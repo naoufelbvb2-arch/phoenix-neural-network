@@ -1,3 +1,7 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# Reproducible artifact of tests/test_cell_runner.py (converged fixture uses a
+# fixed rng_seed + constant input), not unique data — regenerable on demand.
+converged_series.csv

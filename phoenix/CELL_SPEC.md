@@ -139,3 +139,43 @@ phase, not extended in place.
   future planning all require a multi-cell network to even be meaningful to
   test; only the sub-threshold noise-injection mechanism itself is verified
   here.
+
+## Addendum: closed-loop validation (post-v1.0)
+
+`CellRunner` (`phoenix/runner.py`) is a closed-loop validation harness that
+drives a single `Cell` + `ActivityMonitor` over a long time horizon,
+enforcing the correct per-step order (inject input via `receive_input` →
+`integrate(dt)` → record any resulting spike on the monitor →
+`apply_homeostasis` → `maybe_spontaneous_activity`); like `TwoCellNetwork`, it
+is **not** part of the frozen schema itself but a validation/integration tool
+built on top of it.
+
+- **Finding 1 — the homeostatic equilibrium is interior, not pinned.** At
+  `tau=100ms`, `Vthresh` converges monotonically from `-53.0` to
+  approximately `-48.4 mV` with tail standard deviation approximately
+  `0.06 mV`, settling `6.6 / 8.4 mV` clear of `Vthresh_min` / `Vthresh_max`.
+  This is empirical confirmation that `apply_homeostasis` reaches a genuine
+  interior equilibrium over a long horizon — not previously demonstrated
+  beyond short/isolated unit tests (which moved `cell.t` by hand and fed a
+  pre-fabricated monitor).
+
+- **Finding 2 — `tau` / `target_rate_hz` interaction (parameter property, not
+  a bug).** At the *default* `tau=20ms`, the same `target_rate_hz=5.0` sits
+  near the firing rheobase (inter-spike interval ≈ 10×`tau`, where
+  `rate(Vthresh)` is steep), producing roughly 4× noisier convergence (tail
+  σ ≈ `0.24 mV` vs `0.06 mV`) and tail-rate drift to approximately `4.6 Hz`
+  instead of `5.0 Hz`. `tau` and `target_rate_hz` should be chosen jointly,
+  not independently, for future multi-cell parameterization.
+
+- **Finding 3 — refractory-period discretization effect (architectural, not
+  `CellRunner`-specific).** The realized maximum firing rate under saturating
+  input is `1000 / (refractory_period + dt)`, not `1000 / refractory_period`.
+  Cause: `Cell.receive_input` checks refractory using `self.t` *before* this
+  tick's clock advance, while `Cell.check_threshold` (inside `integrate`)
+  checks it *after* — so under the inject-then-integrate ordering, one extra
+  `dt` is spent per cycle before a post-refractory input is first accepted
+  (e.g. `dt=1, refractory=2` → realized ceiling `333 Hz`, not `500 Hz`). This
+  ordering is shared by `TwoCellNetwork.step()` (same inject-before-integrate
+  pattern), so the effect is architectural, not unique to `CellRunner` —
+  worth accounting for before any rate-coding assumptions at network scale.
+  Not changed here; flagged for awareness.

@@ -181,3 +181,25 @@ specification. Any further additions belong to network-level architecture
 per the project's golden rule: no component is added unless it serves a clear
 computational function (memory, prediction, learning, generalization,
 exploration, efficiency).
+
+## 20. Closed-loop validation harness (CellRunner) — 9 new tests (145 total)
+
+Added after v1.0 was frozen: `phoenix/runner.py`'s `CellRunner` drives a
+single `Cell` + `ActivityMonitor` through the full feedback loop
+(`receive_input` → `integrate` → record real spike → `apply_homeostasis` →
+`maybe_spontaneous_activity`) over a long horizon — closing a loop the v1.0
+unit tests only ever exercised half at a time (moving `cell.t` by hand and
+feeding a pre-fabricated monitor). New files only (`phoenix/runner.py`,
+`tests/test_cell_runner.py`); 145/145 total with zero regressions and zero
+existing files touched. It confirms `apply_homeostasis` reaches a genuine
+**interior** equilibrium (`tau=100ms`: `Vthresh` converges `-53.0 → ~-48.4 mV`,
+tail σ ≈ `0.06 mV`, clear of both bounds) rather than pinning at a limit, and
+surfaces two properties: at the default `tau=20ms` the 5 Hz setpoint sits near
+rheobase (~4× noisier convergence — `tau`/`target_rate_hz` must be tuned
+jointly), and the realized max firing rate under saturating input is
+`1000/(refractory_period + dt)` not `1000/refractory_period` (an
+inject-then-integrate ordering effect shared with `TwoCellNetwork.step()`,
+architectural rather than harness-specific). See `CELL_SPEC.md`'s post-v1.0
+addendum for the detailed reference. This is validation tooling layered on top
+of the frozen cell — the `v1.0-single-cell` tag and everything it marks are
+untouched.
