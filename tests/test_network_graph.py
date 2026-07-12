@@ -218,11 +218,23 @@ def test_fan_in_stdp_closer_partner_potentiates_more() -> None:
                 net.inject(C, 100.0)
             net.step()
 
-    # Strict inequality only — the per-trial margin is small by design (both
-    # synapses potentiate; A just potentiates faster), so asserting a magnitude
-    # threshold on the difference would be brittle. Verified: ~5.0353 vs ~5.0261.
+    # Strict inequality only — asserting a magnitude threshold on the difference
+    # would be brittle. THE CORE CLAIM, unchanged: the partner that fires closer
+    # to C potentiates more.
     assert net.weight(A, C) > net.weight(B, C)
 
-    # Both did potentiate (this is a timing ASYMMETRY, not one-sided learning).
+    # A (2 ms before C) potentiates.
     assert net.weight(A, C) > 5.0
-    assert net.weight(B, C) > 5.0
+
+    # [CST] B no longer potentiates — it is now very slightly DEPRESSED
+    # (4.99999987). This is not a regression; it is causal_success working. B
+    # fires 8 ms before C, which is OUTSIDE the synapse's verify_window (6 ms),
+    # so every one of B's spikes is scored a MISS: by the network's own standard
+    # B did not cause C. Its potentiation is therefore gated to ~0 while its
+    # depression is not, leaving a whisker of net depression. A, firing 2 ms
+    # before C, lands inside the window and is scored a hit.
+    #
+    # The timing asymmetry this test exists to demonstrate is now STRONGER, not
+    # weaker: reliable partner potentiates, unreliable partner does not.
+    assert net.weight(B, C) < 5.0
+    assert net.weight(B, C) == pytest.approx(5.0, abs=1e-5)  # only a whisker

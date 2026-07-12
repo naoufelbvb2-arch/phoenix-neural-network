@@ -111,6 +111,15 @@ class Network:
         # (d) Advance the clock.
         self.current_time += self.dt
 
+        # (d2) Score any pre-spike whose verification window has expired as a
+        # MISS. This is the ONLY place misses are counted, so it must run every
+        # tick for every synapse — otherwise a synapse only ever sees its
+        # successes and causal_success degenerates into confirmation bias.
+        # Deterministic order (by pre_id, then insertion order).
+        for neuron_id in sorted(self.outgoing):
+            for synapse in self.outgoing[neuron_id]:
+                synapse.resolve_timeouts(self.current_time)
+
         # (e) Trace-based STDP, generalizing TwoCellNetwork's single-synapse
         #     wiring to arbitrary fan-in/fan-out. For a spiking cell X:
         #       - each INCOMING synapse (partner -> X): X is POST -> on_post_spike

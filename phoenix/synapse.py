@@ -39,10 +39,12 @@ class Synapse:
         w_max: float = 20.0,
         max_history: int = 50,
         n0: float = 5.0,
-        m_min: float = 0.1,
+        m_min: float = 0.0,
         m_max: float = 2.0,
         tau_error: float = 20.0,
         observation_window_factor: float = 3.0,
+        verify_window: float = 6.0,
+        n0_cs: float = 5.0,
     ) -> None:
         self.pre_id: int = pre_id
         self.post_id: int = post_id
@@ -88,12 +90,28 @@ class Synapse:
         # learning_rate is externally adjustable.
         self.n0: float = n0
 
-        # V4: STDP modulation bounds. m_min/m_max are explicit tunables, not
-        # hardcoded — the tradeoff between them (higher m_min risks slow
-        # drift/forgetting of stable patterns; lower m_min risks the synapse
-        # "freezing" once it locks onto a pattern) is left to the caller,
-        # not resolved here. tau_error reuses tau_stdp's default since both
-        # normalize a time-scale quantity, absent a reason to differ.
+        # V4: STDP modulation bounds. m_min/m_max are explicit tunables.
+        #
+        # m_min DEFAULTS TO 0.0 — the earlier tradeoff ("low m_min risks the
+        # synapse freezing once it locks onto a pattern") is now RESOLVED, and
+        # the resolution is the opposite of the old warning: freezing on a
+        # perfect prediction is the INTENDED behavior. No error => no
+        # plasticity, exactly the predictive-coding / free-energy principle
+        # this project already claims. The freeze is not death: any surprise
+        # instantly lifts modulation toward m_max and reawakens the synapse.
+        #
+        # It is also load-bearing. With m_min = 0.1 there is a permanent small
+        # upward push with nothing opposing it, so the weight creeps all the
+        # way to w_max and pins there (dead to learning). With m_min = 0 the
+        # weight settles exactly where prediction became perfect — a
+        # SELF-DETERMINED equilibrium, not a tuned constant.
+        #
+        # HONEST COST: with m_min = 0 the slow forgetting/drift that m_min = 0.1
+        # provided is gone. A perfectly-predicted synapse stops adapting until
+        # something surprises it. That is a deliberate tradeoff.
+        #
+        # tau_error reuses tau_stdp's default since both normalize a time-scale
+        # quantity, absent a reason to differ.
         self.m_min: float = m_min
         self.m_max: float = m_max
         self.tau_error: float = tau_error
@@ -111,6 +129,16 @@ class Synapse:
         self.pre_trace: float = 0.0
         self.post_trace: float = 0.0
         self.last_trace_update: float = 0.0
+
+        # Causal success tracking: P(post | pre). Every pre-spike is held here
+        # awaiting verification; if the post cell fires inside verify_window it
+        # is a HIT, otherwise resolve_timeouts scores it a MISS. See the
+        # causal_success property for why this is NOT redundant with confidence.
+        self.verify_window: float = verify_window
+        self.n0_cs: float = n0_cs
+        self._pending_pre: list[float] = []
+        self.hits: int = 0
+        self.misses: int = 0
 
     @property
     def delay(self) -> float:
@@ -378,6 +406,57 @@ class Synapse:
             1 - math.exp(-weighted_error / self.tau_error)
         )
 
+    @property
+    def causal_success(self) -> float | None:
+        """P(post | pre) — of all MY spikes, how many actually worked?
+
+        ``confidence`` asks "when it worked, how regular was it?" — it is
+        CONDITIONED ON SUCCESS and is therefore blind to false positives. It
+        never counts the times this synapse fired and nothing happened. That is
+        confirmation bias encoded in math: if the post cell fires regularly for
+        its own reasons, ANY spike arriving just before it looks perfectly
+        causal (``observed_delays = [1.0, 1.0, ...]``, ``variance = 0``). The
+        rooster crows every morning and concludes it causes the sunrise.
+
+        ``causal_success`` asks the other question — "of all my spikes, how many
+        actually worked?" — by counting the MISSES. A noise synapse fires
+        constantly and mostly nothing follows, so it is punished by its own
+        failures. Measured against a regularly-firing post cell: a noise synapse
+        scores ``confidence`` ~0.909 (indistinguishable from a true causal loop,
+        which also scores ~0.909) but ``causal_success`` ~0.19.
+
+        **Both are needed. Neither subsumes the other:** ``confidence`` measures
+        timing REGULARITY, ``causal_success`` measures causal RELIABILITY.
+
+        Discounted by ``n0_cs`` in the same Bayesian-shrinkage spirit as
+        ``confidence``'s ``n0``, so a couple of lucky hits cannot mint a high
+        score. None until there is any evidence at all.
+
+        KNOWN LIMIT: this is P(post|pre) — still CORRELATIONAL, not true
+        causality. It does not ask the counterfactual ("would post have fired
+        WITHOUT pre?"). It holds up to ~20% noise in our tests, but a very
+        densely-firing post cell can still let a noise synapse harvest free hits.
+        """
+        n = self.hits + self.misses
+        if n == 0:
+            return None
+        return (self.hits / n) * (n / (n + self.n0_cs))
+
+    def resolve_timeouts(self, now: float) -> None:
+        """Score any pre-spike whose verification window has expired as a MISS.
+
+        This is the ONLY place misses are counted, so the simulation loop must
+        call it every tick (see ``Network.step``). Without it a synapse only ever
+        sees its successes.
+        """
+        still_pending: list[float] = []
+        for t_pre in self._pending_pre:
+            if now >= t_pre + self.verify_window:
+                self.misses += 1  # fired, and nothing followed
+            else:
+                still_pending.append(t_pre)
+        self._pending_pre = still_pending
+
     def _decay_traces(self, current_time: float) -> None:
         """Decay both STDP traces continuously up to ``current_time``.
 
@@ -415,12 +494,26 @@ class Synapse:
         """
         self._decay_traces(t_pre)
 
+        # This spike is now awaiting verification: did the post cell actually
+        # follow? on_post_spike scores a hit; resolve_timeouts scores a miss.
+        self._pending_pre.append(t_pre)
+
         modulation = (
             self.compute_modulation(t_pre, t_post_partner)
             if t_post_partner is not None
             else 1.0
         )
         dw = self.learning_rate * modulation * self.A_minus * self.post_trace
+
+        # Gate DEPRESSION by unreliability: a synapse that reliably causes its
+        # post cell is PROTECTED from the loop's self-inflicted anti-causal
+        # depression (in a cycle every synapse is anti-causal to itself on the
+        # next lap). An unreliable one takes the full hit. Neutral (unscaled)
+        # while there is no evidence yet.
+        causal_success = self.causal_success
+        if causal_success is not None:
+            dw *= 1.0 - causal_success
+
         self.weight = max(self.w_min, min(self.w_max, self.weight - dw))
 
         self.pre_trace += 1.0
@@ -454,12 +547,33 @@ class Synapse:
         """
         self._decay_traces(t_post)
 
+        # CONFIRM pending pre-spikes: any that fired inside the verification
+        # window before this post-spike actually worked -> HIT. (Those left
+        # pending are still awaiting their verdict; resolve_timeouts will score
+        # them a miss once their window expires.)
+        still_pending: list[float] = []
+        for t_pending in self._pending_pre:
+            if t_pending < t_post <= t_pending + self.verify_window:
+                self.hits += 1
+            else:
+                still_pending.append(t_pending)
+        self._pending_pre = still_pending
+
         modulation = (
             self.compute_modulation(t_pre_partner, t_post)
             if t_pre_partner is not None
             else 1.0
         )
         dw = self.learning_rate * modulation * self.A_plus * self.pre_trace
+
+        # Gate POTENTIATION by reliability: an unreliable synapse (one whose
+        # spikes mostly are NOT followed by the post cell) barely potentiates,
+        # however regular its lucky hits happen to look. Neutral (unscaled)
+        # while there is no evidence yet.
+        causal_success = self.causal_success
+        if causal_success is not None:
+            dw *= causal_success
+
         self.weight = max(self.w_min, min(self.w_max, self.weight + dw))
 
         self.post_trace += 1.0

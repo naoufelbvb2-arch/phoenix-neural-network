@@ -239,7 +239,16 @@ def test_multiple_recent_spikes_all_get_paired() -> None:
     # first pair's record_observation() call would corrupt the second
     # pair's modulation within the same tick).
     pre_trace_at_t5 = math.exp(-4.0 / 20.0) + math.exp(-1.0 / 20.0)
-    expected_dw = 0.01 * 1.0 * 1.0 * pre_trace_at_t5  # learning_rate * modulation * A_plus * pre_trace
+
+    # [CST]: potentiation is now GATED BY causal_success. Both of cell_a's spikes
+    # (t=1, t=4) were pending verification and are confirmed by cell_b's spike at
+    # t=5 (both within verify_window=6ms), so hits=2, misses=0 and
+    #   causal_success = (2/2) * (2 / (2 + n0_cs)) = 2/7
+    # The synapse has only two data points, so Bayesian shrinkage keeps its
+    # confidence in its own causality low — and its potentiation correspondingly
+    # small. That is the intended behavior, not a regression.
+    causal_success = 2 / (2 + synapse.n0_cs)
+    expected_dw = 0.01 * 1.0 * 1.0 * pre_trace_at_t5 * causal_success
     expected = 5.0 + expected_dw
     assert abs(synapse.weight - expected) < 1e-9
 
@@ -388,9 +397,20 @@ def test_call_order_produces_correct_first_pair_behavior() -> None:
     # pair, future_expectation would already equal this pair's own delay,
     # making weighted_error (and thus the modulation deviation from 1.0)
     # artificially collapse to 0 regardless of correctness. Asserting the
-    # weight change matches the fully UNMODULATED formula confirms
-    # update_weight() genuinely ran first, against a still-None expectation.
-    expected_dw = synapse.learning_rate * synapse.A_plus * math.exp(-1.0 / synapse.tau_stdp)
+    # weight change matches the UNMODULATED formula (modulation == 1.0)
+    # confirms the update genuinely ran first, against a still-None expectation.
+    #
+    # [CST]: the modulation term is still the unmodulated 1.0 — that is what this
+    # test checks — but potentiation is now additionally GATED BY causal_success.
+    # cell_a's single spike is confirmed by cell_b's (within verify_window), so
+    #   causal_success = (1/1) * (1 / (1 + n0_cs)) = 1/6
+    causal_success = 1 / (1 + synapse.n0_cs)
+    expected_dw = (
+        synapse.learning_rate
+        * synapse.A_plus
+        * math.exp(-1.0 / synapse.tau_stdp)
+        * causal_success
+    )
     assert abs(synapse.weight - (initial_weight + expected_dw)) < 1e-9
 
 

@@ -105,6 +105,10 @@ class TwoCellNetwork:
         # (d) Advance the clock.
         self.current_time += self.dt
 
+        # (d2) Score any pre-spike whose verification window has expired as a
+        # MISS. Must run every tick — it is the only place misses are counted.
+        self.synapse.resolve_timeouts(self.current_time)
+
         # (e) STDP: one O(1) trace update per new spike this tick. The
         # "partner" time passed in is simply the other cell's current
         # last_spike_time (None if it has never spiked) — used only to
