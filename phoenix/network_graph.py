@@ -53,11 +53,39 @@ class Network:
       ever firing a spike, by construction.
     - Partial refractory (Option C) was tested: zero effect.
 
-    Note also that the assembly's CYCLE PERIOD sets its firing rate, and the rate
-    must satisfy the Causal Discrimination Law (see ``Synapse.causal_success``):
-    ``post_rate * verify_window << 1``. Topology sets the rate; homeostasis cannot
-    (reverberation is bistable — raising Vthresh extinguishes the loop rather than
-    slowing it).
+    >>> ASSEMBLY DESIGN IS DOUBLY CONSTRAINED <<<
+
+    1. THE LAW: ``post_rate * verify_window << 1`` (see ``Synapse.causal_success``).
+       The cycle period must keep the firing rate sparse — so ``hop`` must be
+       LARGE ENOUGH. Topology sets the rate; homeostasis cannot (reverberation is
+       bistable: raising Vthresh extinguishes the loop rather than slowing it).
+
+    2. THE HORIZON: ``FAN_IN * hop <= verify_window``. The DEEPEST synapse in the
+       fan-in has latency ``fan_in * hop``. If that exceeds the causal horizon it
+       scores causal_success = 0, is decayed away as noise, the fan-in collapses
+       (3 -> 2), the summed input drops below the 25 mV firing gap, and the
+       assembly DIES. So ``hop`` must also be SMALL ENOUGH.
+
+    THESE PULL IN OPPOSITE DIRECTIONS. With fan_in = 3 and a 10 ms horizon, ``hop``
+    is boxed into roughly 2-3 ms. Measured (10-cell ring, fan_in = 3, horizon 10 ms):
+
+        hop   deepest   cs by depth (k1/k2/k3)   outcome
+         2      6 ms     1.00 / 1.00 / 1.00      healthy,  50 Hz
+         3      9 ms     1.00 / 1.00 / 1.00      healthy,  33 Hz
+         4     12 ms     0.99 / 0.99 / 0.00      deepest pruned -> DIES
+         5     15 ms     0.99 / 0.99 / 0.00      deepest pruned -> DIES
+
+    The bound is INCLUSIVE: a deepest latency of exactly ``verify_window`` survives
+    (verified with fan_in = 2, hop = 5, w = 13: deepest = 10 ms exactly -> cs 0.99,
+    alive at 20 Hz; hop = 6 -> 12 ms -> cs 0.00, dies). It is inclusive only because
+    the horizon boundary belongs to the HIT — see the boundary convention in
+    ``Synapse.resolve_timeouts``; before that was fixed the constraint was
+    effectively a strict ``<``.
+
+    THIS IS THE TIGHTEST CONSTRAINT IN THE ARCHITECTURE, and the first thing to
+    re-derive when scaling the assembly. Raising ``fan_in`` or ``hop`` requires
+    raising ``tau_stdp`` (which widens the horizon), and that in turn weakens noise
+    immunity — see the k-sweep in Synapse's verify_window notes.
     """
 
     def __init__(self, dt: float) -> None:

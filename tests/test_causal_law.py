@@ -167,21 +167,26 @@ def test_sparse_post_rate_restores_discrimination() -> None:
 # ---------------------------------------------------------------------------
 # L3. Why an ASSEMBLY is required: a 2-cell loop is killed by ONE spike
 # ---------------------------------------------------------------------------
-def test_two_cell_loop_is_killed_by_a_single_spike() -> None:
-    """One stray spike ends a 2-cell loop permanently. Mechanism:
+def test_two_cell_loop_dies_to_a_single_spike_in_a_vulnerable_phase() -> None:
+    """A single stray spike ends a 2-cell loop permanently — but ONLY in a
+    vulnerable phase.
 
-    the intruder makes the post cell fire EARLY; that cell enters refractory
-    having already spent its spike; the real loop bump then arrives DURING
-    refractory and is hard-rejected (Option A); the chain is broken, and nothing
-    re-ignites it.
+    Mechanism: the intruder makes the post cell fire EARLY; that cell enters
+    refractory having already spent its spike; the real loop bump then arrives
+    DURING refractory and is hard-rejected (Option A); the chain is broken, and
+    nothing re-ignites it.
 
-    MEASURED CORRECTION to the original claim: the kill is PHASE-DEPENDENT, not
-    universal. Scanning the loop's 4 ms cycle, a single spike kills it in exactly
-    5 of 20 phases (25%) — precisely those landing in the vulnerable quarter. It
-    is pinned here at such a phase (t=100). The fragility is nonetheless real:
-    with any SUSTAINED noise, a strike in the vulnerable quarter — and therefore
-    permanent death — is only a matter of time. That is why assemblies (L4), not
-    2-cell loops, are the unit of reverberation.
+    MEASURED CORRECTION: the kill is PHASE-DEPENDENT, not universal. Scanning the
+    loop's 4 ms cycle, one spike kills it in exactly 5 of 20 phases (~25%) —
+    precisely those landing in the vulnerable quarter; at other phases the loop
+    shrugs it off and keeps firing. This test pins a killing phase (t=100)
+    deliberately.
+
+    The fragility conclusion still holds — under SUSTAINED noise a
+    vulnerable-phase strike becomes inevitable, and the loop has no way to
+    re-ignite — but "one spike ALWAYS kills it" is FALSE, and no argument should
+    rely on it. This is why assemblies (L4), not 2-cell loops, are the unit of
+    reverberation.
     """
     hit_at = 100.0
     net = Network(dt=1.0)
@@ -378,3 +383,108 @@ def test_full_stack_is_robust() -> None:
     # 4) The IDLE synapse is pruned (11.0 -> ~0.07). [OPEN-1] closed.
     assert idle.weight < 2.0
     assert idle.causal_success is None
+
+
+# ---------------------------------------------------------------------------
+# B1/B2. The horizon boundary belongs to the HIT (the [CD-2] bug fix)
+# ---------------------------------------------------------------------------
+def _drive_at_latency(synapse: Synapse, latency: float, n_trials: int) -> None:
+    """Drive a pre/post pair, replicating Network.step()'s REAL call order.
+
+    Network.step() runs resolve_timeouts (step d2) BEFORE on_post_spike (step e),
+    every tick. Reproducing that order is the whole point: it is what exposed the
+    boundary bug.
+    """
+    for k in range(n_trials):
+        base = 100.0 + k * 300.0
+        synapse.on_pre_spike(base, None)
+        for t in range(int(base) + 1, int(base + latency) + 1):
+            synapse.resolve_timeouts(float(t))     # (d2)
+        synapse.on_post_spike(base + latency, base)  # (e)
+        synapse.resolve_timeouts(base + latency + 50.0)
+
+
+def test_latency_exactly_on_the_horizon_is_causal() -> None:
+    """A post-spike at exactly t_pre + verify_window is a HIT.
+
+    BEFORE THE FIX this exact case scored hits=0, misses=50, causal_success=0.0 —
+    a PERFECTLY CAUSAL synapse, whose post cell followed it every single time, was
+    classified as pure noise and decayed away.
+
+    The cause was not a debatable convention but a self-contradiction: on_post_spike
+    scores a hit with `t_pre < t_post <= t_pre + verify_window` (the `<=` puts the
+    boundary in the hit), while resolve_timeouts scored a miss with
+    `now >= t_pre + verify_window` and ran FIRST in the tick — consuming the pending
+    spike before on_post_spike could ever see it, making that `<=` branch dead code.
+    resolve_timeouts now uses a strict `>`: a pre-spike is a miss only once its
+    window has been PASSED, never when it is merely REACHED.
+    """
+    synapse = Synapse(pre_id=1, post_id=2, weight=5.0, distance=1.0)
+    horizon = synapse.verify_window
+    assert horizon == 10.0
+
+    _drive_at_latency(synapse, latency=horizon, n_trials=50)
+
+    assert synapse.hits == 50
+    assert synapse.misses == 0
+    assert synapse.causal_success > 0.9
+
+
+def test_latency_just_beyond_the_horizon_is_not_causal() -> None:
+    """The fix moves the boundary by one instant; it does NOT remove the cutoff."""
+    synapse = Synapse(pre_id=1, post_id=2, weight=5.0, distance=1.0)
+    horizon = synapse.verify_window
+
+    _drive_at_latency(synapse, latency=horizon + 1.0, n_trials=50)
+
+    assert synapse.hits == 0
+    assert synapse.misses == 50
+    assert synapse.causal_success == 0.0
+
+
+# ---------------------------------------------------------------------------
+# B3. The second constraint: FAN_IN * hop <= verify_window
+# ---------------------------------------------------------------------------
+def test_fan_in_depth_must_fit_inside_the_horizon() -> None:
+    """A COROLLARY of the Law, not an exception to it.
+
+    The DEEPEST synapse in a fan-in has latency ``fan_in * hop``. If that exceeds
+    the causal horizon it scores causal_success = 0, is decayed away as noise, the
+    fan-in collapses from 3 to 2, the summed input (2 x 11 = 22 mV) falls below the
+    25 mV firing gap, and the assembly DIES.
+
+    So assembly design is DOUBLY constrained, and the two pull in opposite
+    directions: the Law wants ``hop`` LARGE (to keep firing sparse), the horizon
+    wants it SMALL (to keep the deepest synapse causal). With fan_in = 3 and a
+    10 ms horizon, hop is boxed into ~2-3 ms.
+    """
+    horizon = Synapse(pre_id=0, post_id=1, weight=1.0, distance=1.0).verify_window
+    assert horizon == 10.0
+
+    # hop = 3 -> deepest latency 9 ms <= 10 ms: every depth is causal.
+    ok_net, ok_spikes = _ring(hop=3, run_ms=30_000)
+    assert FAN_IN * 3 <= horizon
+    for k in range(1, FAN_IN + 1):
+        depth = [s for i in range(RING) for s in ok_net.incoming[i]
+                 if s.pre_id == (i - k) % RING]
+        assert all(s.causal_success > 0.5 for s in depth), f"depth k={k} not causal"
+    assert _cell_rate(ok_spikes, 0, 25_000, 30_000) > 10.0  # reverberating
+
+    # hop = 4 -> deepest latency 12 ms > 10 ms: the DEEPEST synapse is pruned.
+    bad_net, bad_spikes = _ring(hop=4, run_ms=30_000)
+    assert FAN_IN * 4 > horizon
+
+    deepest = [s for i in range(RING) for s in bad_net.incoming[i]
+               if s.pre_id == (i - FAN_IN) % RING]
+    shallower = [s for i in range(RING) for s in bad_net.incoming[i]
+                 if s.pre_id == (i - 1) % RING]
+
+    # It fired, its post followed — but too late to be credited. Judged non-causal.
+    assert all(s.causal_success == 0.0 for s in deepest)
+    # ...and therefore decayed well below its (causal, protected) neighbours.
+    assert statistics.mean(s.weight for s in deepest) < statistics.mean(
+        s.weight for s in shallower
+    )
+
+    # The fan-in has collapsed 3 -> 2, so the assembly can no longer sustain itself.
+    assert _cell_rate(bad_spikes, 0, 25_000, 30_000) == 0.0

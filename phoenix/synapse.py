@@ -574,15 +574,31 @@ class Synapse:
         return (self.hits / n) * (n / (n + self.n0_cs))
 
     def resolve_timeouts(self, now: float) -> None:
-        """Score any pre-spike whose verification window has expired as a MISS.
+        """Score any pre-spike whose verification window has PASSED as a MISS.
 
         This is the ONLY place misses are counted, so the simulation loop must
         call it every tick (see ``Network.step``). Without it a synapse only ever
         sees its successes.
+
+        BOUNDARY CONVENTION: a post-spike at exactly ``t_pre + verify_window`` is
+        a HIT. This method must therefore use a STRICT ``>``. Using ``>=`` was a
+        bug: ``Network.step`` calls resolve_timeouts (step d2) BEFORE
+        on_post_spike (step e), so a ``>=`` here consumed the pending spike as a
+        miss before on_post_spike — whose own guard is
+        ``t_pre < t_post <= t_pre + verify_window`` — ever saw it. That made
+        on_post_spike's ``<=`` branch DEAD CODE, and the two guards stated
+        opposite intentions about the same instant, with the earlier one silently
+        winning.
+
+        The damage was real: a PERFECTLY CAUSAL synapse whose latency landed
+        exactly on the horizon scored 0 hits / 50 misses -> causal_success = 0.0,
+        and was decayed away as pure noise despite its post cell following it
+        every single time. A pre-spike is a miss only once the window has been
+        PASSED, never when it is merely REACHED.
         """
         still_pending: list[float] = []
         for t_pre in self._pending_pre:
-            if now >= t_pre + self.verify_window:
+            if now > t_pre + self.verify_window:
                 self.misses += 1  # fired, and nothing followed
             else:
                 still_pending.append(t_pre)

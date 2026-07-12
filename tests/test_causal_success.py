@@ -129,8 +129,18 @@ def test_causal_success_counts_misses() -> None:
     synapse.resolve_timeouts(100.0 + synapse.verify_window - 1.0)
     assert synapse.misses == 0  # verdict not due yet
 
-    # ...and scored a MISS once the window expires.
+    # [CD-2] ...still NOT a miss at exactly t_pre + verify_window. The boundary
+    # belongs to the HIT: a post-spike landing precisely on the horizon must
+    # still be creditable, so a pre-spike is only a miss once its window has been
+    # PASSED, not when it is merely REACHED. This assertion previously read
+    # `misses == 1` here — it was encoding the boundary BUG, in which
+    # resolve_timeouts (which runs earlier in the tick) consumed the pending
+    # spike before on_post_spike's own `<=` guard could ever credit it.
     synapse.resolve_timeouts(100.0 + synapse.verify_window)
+    assert synapse.misses == 0
+
+    # ...and scored a MISS once the window is genuinely passed.
+    synapse.resolve_timeouts(100.0 + synapse.verify_window + 1.0)
     assert synapse.misses == 1
     assert synapse.hits == 0
     assert synapse.causal_success == 0.0  # (0/1) * (1/6)
