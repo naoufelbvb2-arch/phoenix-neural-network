@@ -101,6 +101,14 @@ class Cell:
         # input recur at a similar time?" Meaningful only when callers pass
         # source_id (e.g. Synapse-originated delivery); direct/manual
         # receive_input() calls that omit it simply leave it None.
+        #
+        # KNOWN LIMIT (not fixed): trace_context is SINGLE-SOURCE. When two
+        # synapses deliver in the SAME tick, Vm sums both correctly (verified:
+        # two 10 mV bumps -> -55.02 mV), but trace_context keeps only the LAST
+        # source written — the other is silently lost. In a dense network,
+        # where many inputs land per tick, this makes trace_context nearly
+        # meaningless as a "who caused this" signal. It answers "did source X
+        # deliver most recently", not "which sources contributed".
         self.trace_context_source: int | None = None
         self.trace_context_time: float | None = None
 
@@ -145,6 +153,14 @@ class Cell:
         the cell fully ignores incoming input (dropped, not accumulated).
         A future Option C (partial/reduced sensitivity during a relative
         refractory window) may relax this, but is out of scope here.
+
+        KNOWN LIMIT (not fixed): Option A SILENTLY DISCARDS CHARGE. Input
+        arriving during refractory is hard-rejected outright, not queued or
+        attenuated — the charge simply vanishes, with no record that it
+        arrived. In a dense network many deliveries will land inside some
+        target's refractory window and be dropped invisibly, so the charge a
+        cell actually integrates can be well below the charge the network
+        thinks it sent.
 
         On acceptance, also records ``trace_context_source``/``_time`` —
         the identity and timing of the most recent contributing source.

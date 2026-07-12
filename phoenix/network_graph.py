@@ -121,10 +121,18 @@ class Network:
         # `is not None` (which would feed -inf into the prediction pathway and
         # produce observed_delay = t - (-inf) = +inf, silently corrupting it).
         #
-        # NOTE: last_spike_time pairing preserves the known [N1] single-pairing
-        # limitation (see review). Weight STDP already uses full traces; only
-        # the prediction/observation pathway pairs single-last. Revisit when
-        # observation semantics are settled. Not final.
+        # OBSERVATION SEMANTICS — SETTLED (see Synapse.record_observation).
+        # The synapse predicts the delay of the TRIGGERING spike: the
+        # presynaptic spike most immediately preceding the postsynaptic one,
+        # which is exactly what last_spike_time supplies here. This is a
+        # deliberate, tested modeling choice, not an implementation artifact.
+        # All-pairs semantics was evaluated and REJECTED: it cannot converge —
+        # averaging structurally distinct delays yields an expectation matching
+        # no real physical delay, pinning prediction_error permanently above
+        # zero (see test_prediction_error_converges_to_zero_on_perfect_pattern
+        # and test_all_pairs_semantics_cannot_converge). Weights may still SUM
+        # over all pairs via traces; prediction must ESTIMATE A DISTRIBUTION,
+        # which requires a homogeneous sample.
         #
         # (Recurrent-topology property, not handled now: if a synapse X->Y has
         # BOTH endpoints fire in the same tick, that synapse receives BOTH

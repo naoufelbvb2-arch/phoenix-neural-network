@@ -79,7 +79,18 @@ def test_ac1_loop_is_genuinely_closed(converged: CellRunner) -> None:
     # The runner records to the monitor ONLY the genuine return value of
     # integrate (see CellRunner.step). So the monitor's spike history must be
     # exactly the runner's recorded integrate outputs — same values, order.
-    assert runner.monitor._spike_times == runner.spike_times
+    #
+    # [N1-b]: ActivityMonitor now BOUNDS its memory to the rate window, so it
+    # retains that window's tail rather than all history. This stays an EXACT
+    # equality against the genuine integrate outputs — it is simply computed
+    # over precisely what bounded memory is supposed to still be holding.
+    window_start = runner.times[-1] - runner.monitor.window_size
+    expected_retained = [ts for ts in runner.spike_times if ts >= window_start]
+    assert list(runner.monitor._spike_times) == expected_retained
+    assert len(expected_retained) > 0
+
+    # The never-pruned last-spike field also tracks a genuine integrate output.
+    assert runner.monitor._last_spike_time == runner.spike_times[-1]
     assert len(runner.spike_times) > 0
 
     # Real spikes: strictly increasing in time, none beyond the simulated horizon.

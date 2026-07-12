@@ -266,7 +266,13 @@ def test_confidence_high_for_regular_delays_with_enough_samples() -> None:
 
 
 def test_confidence_low_for_irregular_delays() -> None:
-    synapse = Synapse(pre_id=1, post_id=2, weight=5.0, distance=1.0)
+    # Wide observation window on purpose: this test's delay set deliberately
+    # includes 80 ms, beyond the default eligibility window (3 * tau_stdp =
+    # 60 ms), and the arithmetic documented below depends on it being recorded.
+    synapse = Synapse(
+        pre_id=1, post_id=2, weight=5.0, distance=1.0,
+        observation_window_factor=20.0,
+    )
     for delay in (5.0, 50.0, 12.0, 80.0, 3.0, 60.0):
         synapse.record_observation(t_pre=0.0, t_post=delay)
 
@@ -400,7 +406,13 @@ def test_weighted_error_falls_back_to_raw_when_confidence_none() -> None:
 
 
 def test_weighted_error_scales_down_with_low_confidence() -> None:
-    synapse = Synapse(pre_id=1, post_id=2, weight=5.0, distance=1.0)
+    # Wide observation window on purpose: the 80 ms delay below is beyond the
+    # default eligibility window (3 * tau_stdp = 60 ms) and must stay recordable
+    # for this irregular set to produce the intended low confidence.
+    synapse = Synapse(
+        pre_id=1, post_id=2, weight=5.0, distance=1.0,
+        observation_window_factor=20.0,
+    )
     for delay in (5.0, 50.0, 12.0, 80.0, 3.0, 60.0):  # irregular -> low confidence
         synapse.record_observation(t_pre=0.0, t_post=delay)
     assert synapse.confidence is not None
@@ -489,7 +501,14 @@ def test_modulation_respects_custom_bounds() -> None:
 
 def test_update_weight_uses_modulated_rate_not_raw_rate() -> None:
     low_surprise = Synapse(pre_id=1, post_id=2, weight=5.0, distance=1.0)
-    high_surprise = Synapse(pre_id=1, post_id=2, weight=5.0, distance=1.0)
+    # Wide observation window on purpose: high_surprise's expectation is built
+    # from a 200 ms delay, far beyond the default eligibility window
+    # (3 * tau_stdp = 60 ms). The wide window keeps that delay recordable so the
+    # high-surprise expectation can be established at all. The DEFAULT stays 3.0.
+    high_surprise = Synapse(
+        pre_id=1, post_id=2, weight=5.0, distance=1.0,
+        observation_window_factor=20.0,
+    )
 
     # low_surprise expects ~15.0 (matches the event applied below).
     for _ in range(20):

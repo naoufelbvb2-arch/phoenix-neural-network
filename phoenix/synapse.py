@@ -42,6 +42,7 @@ class Synapse:
         m_min: float = 0.1,
         m_max: float = 2.0,
         tau_error: float = 20.0,
+        observation_window_factor: float = 3.0,
     ) -> None:
         self.pre_id: int = pre_id
         self.post_id: int = post_id
@@ -71,6 +72,16 @@ class Synapse:
         # synapse can score highly on despite low weight.
         self.observed_delays: list[float] = []
         self.max_history: int = max_history
+
+        # Eligibility window for the OBSERVATION path: a pre/post pair further
+        # apart than observation_window_factor * tau_stdp is not plausibly
+        # cause-and-effect, so it is not an observation at all. Without this, a
+        # post-spike after a long silence gets paired with a pre-spike from
+        # hundreds of ms ago and that non-causal gap is recorded as a genuine
+        # "observed delay". This restores the 3 * tau_stdp windowing that
+        # predated the trace refactor — on the observation path ONLY; weights
+        # keep their continuous exponential traces.
+        self.observation_window_factor: float = observation_window_factor
 
         # V2: sample-size discount constant for `confidence`, exposed as a
         # plain mutable attribute (not baked in) — consistent with how
@@ -120,7 +131,15 @@ class Synapse:
         return arrival_time, self.effective_weight()
 
     def update_weight(self, t_pre: float, t_post: float) -> float:
-        """Apply one prediction-error-modulated STDP update.
+        """REFERENCE IMPLEMENTATION ONLY — not used by any live simulation path.
+
+        Retained to document the equivalence between this pairwise form and the
+        trace-based :meth:`on_pre_spike` / :meth:`on_post_spike`, which are what
+        every live path (``Network``, ``TwoCellNetwork``) actually calls. **Do
+        not call from network code**: two live implementations of the same rule
+        can silently diverge. Its own tests are the equivalence documentation.
+
+        Applies one prediction-error-modulated STDP update.
 
         ``delta_t = t_post - t_pre``: positive means pre fired before post
         (causal — potentiate), negative means pre fired after post
@@ -158,16 +177,43 @@ class Synapse:
     def record_observation(self, t_pre: float, t_post: float) -> None:
         """Record an observed pre->post delay, independent of STDP.
 
-        Only genuinely causal pairs (``t_post > t_pre``) are recorded — this
-        is tracking "what follows what," not general spike-timing
-        statistics, so simultaneous or anti-causal pairs are ignored.
-        Purely observational: never touches ``weight``. Callers (e.g. the
-        network layer) may call this and :meth:`update_weight` for the same
-        pair, but the two mechanisms are intentionally decoupled.
+        DECLARED MODEL: **the synapse predicts the delay of the TRIGGERING
+        spike** — the presynaptic spike most immediately preceding the
+        postsynaptic one (callers pass the partner's ``last_spike_time``).
+        This is a deliberate, tested modeling choice, not an implementation
+        artifact. All-pairs semantics (recording EVERY recent pre-spike
+        against the post-spike) was evaluated and **rejected**: it cannot
+        converge. With pre-spikes at offsets {10, 2} before the post-spike it
+        yields ``mean_observed_delay = 6`` ms — an arithmetic midpoint
+        matching no real physical delay — so prediction_error stays pinned at
+        ~4 ms forever, and it reports ``confidence ~0.47`` on a ZERO-noise
+        system by conflating *structural spread* (a fixed fact of the wiring)
+        with *timing jitter* (the irregularity confidence is meant to
+        measure). See ``test_all_pairs_semantics_cannot_converge``.
+
+        Weights and prediction are asymmetric FOR A GOOD REASON — this is not
+        an inconsistency to "fix": weights SUM contributions, so all-pairs
+        traces are correct there (summation over heterogeneous events is
+        legitimate); prediction ESTIMATES A DISTRIBUTION, which requires a
+        homogeneous sample, and mixing two structurally distinct delays into
+        one distribution makes convergence mathematically impossible.
+
+        Two guards, both required:
+        - Only genuinely causal pairs (``t_post > t_pre``) — this tracks "what
+          follows what", so simultaneous/anti-causal pairs are ignored.
+        - Only pairs inside the eligibility window
+          (``observation_window_factor * tau_stdp``) — a pair further apart
+          than that is not plausibly cause-and-effect, and recording it would
+          poison the distribution with a non-causal gap.
+
+        Purely observational: never touches ``weight``. Callers may call this
+        and :meth:`update_weight` for the same pair; the two are decoupled.
         """
         observed_delay = t_post - t_pre
         if observed_delay <= 0:
             return
+        if observed_delay > self.observation_window_factor * self.tau_stdp:
+            return  # too far apart to be a causal source; not an observation
 
         self.observed_delays.append(observed_delay)
         if len(self.observed_delays) > self.max_history:
@@ -212,6 +258,13 @@ class Synapse:
 
         None whenever delay_variance is None (fewer than 2 observations),
         matching V1's None-propagation convention exactly.
+
+        KNOWN LIMIT (not fixed): dt quantization INFLATES this score. Observed
+        delays are whole multiples of the simulation ``dt``, so any jitter
+        finer than one tick is invisible — variance is under-reported and
+        regularity therefore over-reported. A synapse can look perfectly
+        regular simply because its jitter is smaller than the clock's
+        resolution.
         """
         variance = self.delay_variance
         if variance is None:
@@ -356,12 +409,9 @@ class Synapse:
         relative to.
 
         A pre-spike explained by an earlier post-spike is the anti-causal
-        direction, so (per the existing causal-only convention) this never
-        feeds :meth:`record_observation`: the guard below only calls it
-        when ``t_post_partner < t_pre``, which is exactly the ordering
-        ``record_observation`` itself rejects as non-causal — so this call
-        is always a documented no-op, never a live observation source. The
-        forward-causal direction is handled by :meth:`on_post_spike`.
+        direction, so (per the causal-only convention) this never feeds
+        :meth:`record_observation`. The forward-causal direction is handled
+        by :meth:`on_post_spike`.
         """
         self._decay_traces(t_pre)
 
@@ -375,8 +425,9 @@ class Synapse:
 
         self.pre_trace += 1.0
 
-        if t_post_partner is not None and t_post_partner < t_pre:
-            self.record_observation(t_pre, t_post_partner)
+        # No record_observation() here by construction: the anti-causal
+        # direction (t_post_partner < t_pre) is exactly what record_observation
+        # rejects, so calling it could only ever be a no-op.
 
         return self.weight
 
