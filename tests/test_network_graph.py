@@ -223,18 +223,15 @@ def test_fan_in_stdp_closer_partner_potentiates_more() -> None:
     # to C potentiates more.
     assert net.weight(A, C) > net.weight(B, C)
 
-    # A (2 ms before C) potentiates.
-    assert net.weight(A, C) > 5.0
-
-    # [CST] B no longer potentiates — it is now very slightly DEPRESSED
-    # (4.99999987). This is not a regression; it is causal_success working. B
-    # fires 8 ms before C, which is OUTSIDE the synapse's verify_window (6 ms),
-    # so every one of B's spikes is scored a MISS: by the network's own standard
-    # B did not cause C. Its potentiation is therefore gated to ~0 while its
-    # depression is not, leaving a whisker of net depression. A, firing 2 ms
-    # before C, lands inside the window and is scored a hit.
+    # BOTH partners potentiate: this is a timing ASYMMETRY, not one-sided learning.
     #
-    # The timing asymmetry this test exists to demonstrate is now STRONGER, not
-    # weaker: reliable partner potentiates, unreliable partner does not.
-    assert net.weight(B, C) < 5.0
-    assert net.weight(B, C) == pytest.approx(5.0, abs=1e-5)  # only a whisker
+    # [CST-2] History: under CST's hardcoded 6 ms verify_window, B (firing 8 ms
+    # before C) fell OUTSIDE the causal horizon, was scored a full MISS, and was
+    # net-DEPRESSED as if it were noise — even though STDP itself was learning
+    # from it (tau_stdp = 20 ms). That inconsistency is exactly what CST-2 fixed:
+    # the horizon is now derived (0.5 * tau_stdp = 10 ms), so B's 8 ms latency is
+    # correctly recognised as causal (causal_success 0.857, same as A's) and it
+    # potentiates again. A still potentiates MORE, because its pre_trace at C's
+    # firing is larger — which is the actual claim of this test.
+    assert net.weight(A, C) > 5.0
+    assert net.weight(B, C) > 5.0

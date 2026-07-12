@@ -43,13 +43,40 @@ class Synapse:
         m_max: float = 2.0,
         tau_error: float = 20.0,
         observation_window_factor: float = 3.0,
-        verify_window: float = 6.0,
+        verify_window: float | None = None,  # default: verify_window_factor * tau_stdp
+        verify_window_factor: float = 0.5,
         n0_cs: float = 5.0,
     ) -> None:
         self.pre_id: int = pre_id
         self.post_id: int = post_id
         self.weight: float = weight
         self.distance: float = distance
+
+        # KNOWN ARCHITECTURAL LIMIT — LONG-RANGE CONNECTIVITY IS NOT SUPPORTED.
+        # With propagation_speed = 1.0, delay EQUALS distance, and
+        # effective_weight = w * exp(-distance / decay_constant) makes any
+        # distant synapse vanishingly weak. Measured (w capped at w_max = 20,
+        # decay_constant = 10; a cell needs 25 mV from rest to fire):
+        #
+        #   distance   max effective weight   synapses needed to fire one cell
+        #     2            16.4 mV              2
+        #    10             7.4 mV              4
+        #    20             2.7 mV             10
+        #    30             1.0 mV             26
+        #    50             0.13 mV           186
+        #
+        # So Phoenix currently has NO long-range shortcuts — every connection is
+        # effectively local. This is a limitation of the CABLE MODEL, not of
+        # verify_window: the causal horizon only refuses to learn synapses that
+        # attenuation had already rendered useless.
+        #
+        # The correct fix, when it is needed, is FASTER AXONS, NOT SLOWER
+        # SYNAPSES: raise propagation_speed for long-range projections (biology
+        # myelinates for exactly this reason). A synapse with distance = 50 and
+        # propagation_speed = 10 has a delay of 5 ms — comfortably inside the
+        # causal horizon — while its attenuation is unchanged. Widening
+        # verify_window would be the WRONG fix: it degrades noise immunity
+        # without making distant synapses any stronger. DEFERRED, DELIBERATELY.
         self.propagation_speed: float = propagation_speed
         self.decay_constant: float = decay_constant
 
@@ -134,7 +161,38 @@ class Synapse:
         # awaiting verification; if the post cell fires inside verify_window it
         # is a HIT, otherwise resolve_timeouts scores it a MISS. See the
         # causal_success property for why this is NOT redundant with confidence.
-        self.verify_window: float = verify_window
+        #
+        # verify_window is DERIVED from tau_stdp, not hardcoded. It defines the
+        # network's CAUSAL HORIZON, and it must be consistent with the window
+        # over which weights actually learn: a hardcoded 6 ms against a 20 ms
+        # tau_stdp meant an 8 ms partner (an ordinary biological latency) was
+        # scored a full MISS and depressed as if it were noise, while STDP
+        # itself was happily learning from it. The two mechanisms disagreed
+        # about what "causal" means.
+        #
+        # verify_window is a HARD cutoff (binary yes/no); tau_stdp is a SOFT
+        # exponential influence range. They are different kinds of quantity and
+        # need not be equal — but the cutoff must lie INSIDE the influence range
+        # and be justified from it. Hence a factor, and hence 0.5.
+        #
+        # MEASURED TRADEOFF (weight gap = w(loop) - w(noise); positive = the
+        # network can still tell a causal loop from noise):
+        #
+        #   k     window   noise 5%   noise 10%   noise 20%
+        #   0.5   10 ms    +1.52      +5.74       +10.06     <- chosen
+        #   0.75  15 ms    +1.20      +4.07        +3.24  (a seed failed)
+        #   1.0   20 ms    +0.98      +2.63        +0.52  (collapsed)
+        #
+        # A wider window recognises slower causation but gives a noise synapse
+        # more chances to harvest free hits from a regularly-firing post cell,
+        # and the discrimination collapses. k = 0.5 sees 8 ms causation while
+        # keeping a large noise margin.
+        self.verify_window_factor: float = verify_window_factor
+        self.verify_window: float = (
+            verify_window
+            if verify_window is not None
+            else verify_window_factor * self.tau_stdp
+        )
         self.n0_cs: float = n0_cs
         self._pending_pre: list[float] = []
         self.hits: int = 0
@@ -431,6 +489,25 @@ class Synapse:
         Discounted by ``n0_cs`` in the same Bayesian-shrinkage spirit as
         ``confidence``'s ``n0``, so a couple of lucky hits cannot mint a high
         score. None until there is any evidence at all.
+
+        THE CAUSAL HORIZON. ``verify_window`` (default ``0.5 * tau_stdp`` =
+        10 ms) is what this measurement is relative to: a presynaptic partner
+        whose spike is not followed by a post-spike inside that window is scored
+        a MISS and judged non-causal. That is a deliberate modeling decision,
+        not an artifact.
+
+        **It limits SYNAPTIC LATENCY, not SEQUENCE LENGTH.** This distinction is
+        the difference between a harmless constraint and a crippling one. A long
+        temporal sequence is learned as a CHAIN of short causal links — verified:
+        a 4-cell chain (1->2->3->4) with 3 ms hops learns end-to-end, every
+        synapse reaching ``causal_success`` 0.889, because each synapse only ever
+        sees its own immediate 3 ms neighbour. A 500 ms pattern can be learned by
+        150 synapses each seeing 3 ms. What the horizon forbids is a SINGLE
+        synapse jumping a gap longer than the window (a direct 25 ms-latency
+        synapse scores 0.0 and is pruned) — and cable attenuation had ALREADY
+        made such a synapse useless (see the long-range note at
+        ``decay_constant``), so the cutoff and the cable physics agree rather
+        than conflict.
 
         KNOWN LIMIT: this is P(post|pre) — still CORRELATIONAL, not true
         causality. It does not ask the counterfactual ("would post have fired
