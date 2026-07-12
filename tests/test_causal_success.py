@@ -188,9 +188,15 @@ def test_noise_synapse_is_pruned() -> None:
 
     # The loop is trusted; the noise is not. This is the separation `confidence`
     # could not make (it scored both ~0.909).
+    #
+    # [CD] Passive decay is now live in Network.step(), so the noise synapse is
+    # pruned considerably HARDER than under CST alone (weight 9.04, was 13.31) —
+    # decay and causal_success gating reinforce each other. cs(noise) also settles
+    # lower (0.310, was 0.461): the decayed noise synapse fires into a post cell
+    # it can no longer influence, so it accumulates misses faster than hits.
     assert loop.causal_success > 0.5 > noise.causal_success
-    assert loop.causal_success == pytest.approx(0.989, abs=0.02)
-    assert noise.causal_success == pytest.approx(0.461, abs=0.05)
+    assert loop.causal_success == pytest.approx(0.993, abs=0.02)
+    assert noise.causal_success == pytest.approx(0.310, abs=0.05)
 
     # The noise fired constantly and mostly caused nothing — its own failures
     # convicted it.

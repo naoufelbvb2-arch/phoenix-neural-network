@@ -29,7 +29,36 @@ from phoenix.synapse import Synapse
 
 
 class Network:
-    """An arbitrary directed graph of ``Cell`` nodes connected by ``Synapse`` edges."""
+    """An arbitrary directed graph of ``Cell`` nodes connected by ``Synapse`` edges.
+
+    >>> REVERBERATION REQUIRES AN ASSEMBLY (>= ~6 CELLS), NOT A 2-CELL LOOP <<<
+
+    A 2-cell loop is structurally fragile: a SINGLE stray spike kills it
+    permanently. Verified autopsy — the intruder makes the post cell fire EARLY;
+    that cell enters refractory having already spent its spike; the real loop
+    bump then arrives during refractory and is hard-rejected (Option A); the
+    chain is broken and NOTHING re-ignites it.
+
+        topology            1 noise hit   10 hits   10% noise
+        2-cell loop            0 Hz        0 Hz      45 Hz (broken)
+        10-cell assembly     100 Hz      100 Hz     208 Hz
+
+    A 10-cell assembly survives all of it unchanged. Robustness here is an
+    EMERGENT STATISTICAL PROPERTY OF REDUNDANCY — the assembly distributes the
+    activity, so corrupting one cell does not lose the pattern. Do not go looking
+    for a rescue mechanism to bolt onto the 2-cell case:
+
+    - Spontaneous activity was tested and CANNOT rescue it. Its safety clamp
+      (``Vm <- min(Vm, Vthresh - 0.01)``) makes it mathematically incapable of
+      ever firing a spike, by construction.
+    - Partial refractory (Option C) was tested: zero effect.
+
+    Note also that the assembly's CYCLE PERIOD sets its firing rate, and the rate
+    must satisfy the Causal Discrimination Law (see ``Synapse.causal_success``):
+    ``post_rate * verify_window << 1``. Topology sets the rate; homeostasis cannot
+    (reverberation is bistable — raising Vthresh extinguishes the loop rather than
+    slowing it).
+    """
 
     def __init__(self, dt: float) -> None:
         self.dt: float = dt
@@ -119,6 +148,18 @@ class Network:
         for neuron_id in sorted(self.outgoing):
             for synapse in self.outgoing[neuron_id]:
                 synapse.resolve_timeouts(self.current_time)
+
+        # (d3) LAZY, event-driven weight decay. A synapse's weight is refreshed
+        # exactly when it could matter: when its POST cell is active. Idle
+        # synapses cost nothing while idle, but are decayed — and therefore
+        # pruned — the moment their post cell fires. Decay is computed from
+        # elapsed time in one step, so skipping ticks is exact, not approximate.
+        #
+        # Deliberately NOT a sweep over all synapses every tick: that would be
+        # O(synapses x ticks) and would destroy the event-driven cost model.
+        for spike in sorted(spikes, key=lambda s: s.neuron_id):
+            for synapse in self.incoming[spike.neuron_id]:
+                synapse.apply_decay(self.current_time)
 
         # (e) Trace-based STDP, generalizing TwoCellNetwork's single-synapse
         #     wiring to arbitrary fan-in/fan-out. For a spiking cell X:

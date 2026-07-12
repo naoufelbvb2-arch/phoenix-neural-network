@@ -53,6 +53,7 @@ def _syn(
     return Synapse(
         pre_id=pre, post_id=post, weight=weight, distance=delay,
         propagation_speed=1.0, decay_constant=decay,
+        tau_decay=1e18,  # [CD] isolate from decay; see test_network_graph._syn
     )
 
 

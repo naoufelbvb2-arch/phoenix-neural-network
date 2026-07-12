@@ -42,6 +42,13 @@ def _syn(pre: int, post: int, weight: float, delay: float) -> Synapse:
     return Synapse(
         pre_id=pre, post_id=post, weight=weight,
         distance=delay, propagation_speed=1.0, decay_constant=1000.0,
+        # [CD] Isolate from passive weight decay — a SEPARATE mechanism with its
+        # own tests (tests/test_causal_law.py). Decay would otherwise swamp the
+        # micro-scale STDP increments measured here: a new synapse starts at
+        # causal_success = 0 and so leaks at the FULL rate until it proves itself
+        # (~5% in the first second), dwarfing a +0.0015 potentiation. These tests
+        # are about STDP, not decay. Their assertions are otherwise unchanged.
+        tau_decay=1e18,
     )
 
 

@@ -46,6 +46,8 @@ class Synapse:
         verify_window: float | None = None,  # default: verify_window_factor * tau_stdp
         verify_window_factor: float = 0.5,
         n0_cs: float = 5.0,
+        tau_decay: float = 20000.0,
+        decay_power: float = 2.0,
     ) -> None:
         self.pre_id: int = pre_id
         self.post_id: int = post_id
@@ -197,6 +199,11 @@ class Synapse:
         self._pending_pre: list[float] = []
         self.hits: int = 0
         self.misses: int = 0
+
+        # Passive weight decay, gated by causal reliability. See apply_decay.
+        self.tau_decay: float = tau_decay
+        self.decay_power: float = decay_power
+        self._last_decay_time: float = 0.0
 
     @property
     def delay(self) -> float:
@@ -509,10 +516,57 @@ class Synapse:
         ``decay_constant``), so the cutoff and the cable physics agree rather
         than conflict.
 
+        >>> THE CAUSAL DISCRIMINATION LAW <<<
+
+            post_firing_rate * verify_window  <<  1        (i.e. ISI >> verify_window)
+
+        If the post cell fires in nearly EVERY verification window, then a noise
+        spike and a causal spike produce IDENTICAL observations. The causal
+        information is NOT PRESENT IN THE DATA, and no local, observational
+        measure can recover it — this is an information-theoretic limit, not a
+        tuning issue. (A baseline-lift measure, P(post|pre) - P(post), was tried:
+        it returns exactly 0.0 for everything, because P(post) = 1.0. The measure
+        did not fail; it correctly reported that no information exists.)
+
+        Measured, with verify_window = 10 ms:
+
+            post rate   ISI     P(post in a random window)   discrimination
+              5 Hz      200ms          0.05                  works
+             20 Hz       50ms          0.20                  works
+             33 Hz       30ms          0.33                  works
+             50 Hz       20ms          0.50                  marginal
+            100 Hz       10ms          1.00                  IMPOSSIBLE
+            250 Hz        4ms          1.00                  IMPOSSIBLE
+
+        And the consequence, measured on a 10-cell ring:
+
+            hop   post rate   cs(loop)   cs(noise)   w(noise)
+             1     100 Hz      0.998      0.902      20.0 = w_max   <- CATASTROPHE
+             3      33 Hz      0.998      0.320       6.88          <- pruned
+             5      20 Hz      0.996      0.161       7.19          <- pruned
+
+        At 100 Hz the NOISE synapse out-competes the real assembly and pins at
+        w_max. This is the rooster problem returning at the network level: a cell
+        firing every 10 ms makes ANY incoming spike look causal.
+
+        CONSEQUENCE: the network MUST operate in a sparse-firing regime (<~50 Hz
+        with a 10 ms window). This is not a preference — it is a PRECONDITION for
+        causal learning to be possible at all. It is very likely why biological
+        networks fire at 1-20 Hz: sparse coding is not a metabolic luxury but an
+        information-theoretic requirement.
+
+        THE RATE IS SET BY TOPOLOGY (the cycle period), NOT BY HOMEOSTASIS.
+        Homeostasis was tested and CANNOT enforce this Law: reverberation is
+        BISTABLE (all-or-nothing), so raising Vthresh does not slow the loop, it
+        EXTINGUISHES it (measured: 100 Hz -> 0 Hz within 2 s, after which Vthresh
+        sank to its floor with nothing left to re-ignite). Homeostasis assumes a
+        graded system; reverberation is not one.
+
         KNOWN LIMIT: this is P(post|pre) — still CORRELATIONAL, not true
         causality. It does not ask the counterfactual ("would post have fired
         WITHOUT pre?"). It holds up to ~20% noise in our tests, but a very
-        densely-firing post cell can still let a noise synapse harvest free hits.
+        densely-firing post cell can still let a noise synapse harvest free hits
+        (which is exactly what the Law above quantifies).
         """
         n = self.hits + self.misses
         if n == 0:
@@ -533,6 +587,52 @@ class Synapse:
             else:
                 still_pending.append(t_pre)
         self._pending_pre = still_pending
+
+    def apply_decay(self, now: float) -> None:
+        """Lazy, event-driven weight decay gated by causal reliability.
+
+        Applied ON DEMAND (not every tick): the accumulated decay over the whole
+        elapsed interval is computed in ONE exponential step. This keeps the
+        simulation O(spikes) rather than O(synapses x ticks) — essential to the
+        neuromorphic event-driven cost model, and therefore a correctness
+        requirement of the design, not a micro-optimization.
+
+        Gating: ``leak ∝ (1 - causal_success) ** decay_power``.
+
+        - An IDLE synapse (never fired: hits = misses = 0 -> causal_success is
+          None -> treated as 0.0) decays at the FULL rate and is pruned. This is
+          the ONLY mechanism in the system that prunes a synapse which never
+          fires: causal_success alone cannot, since with no events it has no
+          opinion and the weight would otherwise sit at its initial value
+          forever, contributing dead charge to fan-in ([OPEN-1]).
+
+        - A PROVEN CAUSAL synapse is protected. Quadratic gating is load-bearing
+          here, not cosmetic:
+
+          * BLIND decay (no gating) is WRONG — measured: it drags everything down
+            equally (loop 7.78 vs noise 7.83, i.e. ZERO discrimination) and kills
+            the loop outright.
+
+          * LINEAR gating (decay_power = 1) is TOO WEAK. A real loop's
+            causal_success saturates at ~0.996, never 1.0, because of the
+            Bayesian discount n/(n + n0_cs). That residual leaves a permanent
+            ~0.4% bleed which killed the loop depending on the RNG seed.
+
+          * QUADRATIC gating (decay_power = 2) fixes it: over 100 s a causal
+            synapse (cs = 0.996) loses 0.008% instead of 2.0% — ~250x less —
+            while an idle synapse (cs = 0) decays at the full, ungated rate.
+        """
+        elapsed = now - self._last_decay_time
+        if elapsed <= 0:
+            return
+
+        causal_success = self.causal_success
+        if causal_success is None:
+            causal_success = 0.0  # no evidence of ever having worked -> not spared
+
+        leak = ((1.0 - causal_success) ** self.decay_power) / self.tau_decay
+        self.weight = max(self.w_min, self.weight * math.exp(-leak * elapsed))
+        self._last_decay_time = now
 
     def _decay_traces(self, current_time: float) -> None:
         """Decay both STDP traces continuously up to ``current_time``.
