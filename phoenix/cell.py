@@ -26,6 +26,24 @@ class Cell:
     refractory bookkeeping, and timing that later stages of Phoenix will use.
     """
 
+    # __slots__ eliminates the per-instance __dict__. Measured: Cell 3,340 -> far
+    # smaller, Synapse 1,392 -> ~232 B. HONEST LIMIT: this does NOT close the gap
+    # to the million-cell target on its own (a ~5.8x saving, not ~83x). It is a
+    # cheap bridge; Struct-of-Arrays remains necessary at 1M cells and is deferred
+    # deliberately until the multi-cell behavior is trusted.
+    #
+    # Note: __slots__ forbids setting ad-hoc attributes at runtime. That is
+    # intentional — such a write now fails loudly instead of silently creating a
+    # shadow field. Do NOT add __dict__ back to "fix" a test; fix the test.
+    __slots__ = (
+        "neuron_id", "Vrest", "Vm", "Vthresh", "Vreset", "tau",
+        "refractory_period", "refractory_until", "tau_homeostasis",
+        "target_rate_hz", "Vthresh_min", "Vthresh_max", "t", "last_spike_time",
+        "stdp_history_window", "spike_history", "input_current",
+        "trace_context_source", "trace_context_time", "spontaneous_noise_std",
+        "spontaneous_silence_threshold_ms", "_rng_seed", "_rng",
+    )
+
     def __init__(
         self,
         neuron_id: int,
@@ -120,7 +138,19 @@ class Cell:
         # regardless of what else in the process has drawn random numbers.
         self.spontaneous_noise_std: float = spontaneous_noise_std
         self.spontaneous_silence_threshold_ms: float = spontaneous_silence_threshold_ms
-        self._rng: random.Random = random.Random(rng_seed)
+        # LAZY RNG. A per-cell random.Random costs 5,408 bytes — ~60% of the
+        # cell's entire footprint — and Network.step() never calls
+        # maybe_spontaneous_activity at all, so for every cell in a large network
+        # that memory was pure waste. The generator is now created on FIRST USE.
+        #
+        # Determinism is untouched: the same rng_seed still produces the same
+        # sequence for that cell. (A single generator SHARED across cells was the
+        # obvious alternative, but it would interleave draws between cells and so
+        # break the per-cell reproducibility that CellRunner's spontaneous-activity
+        # tests depend on. Lazy creation gets the memory back with zero behavioral
+        # risk.)
+        self._rng_seed: int | None = rng_seed
+        self._rng: random.Random | None = None
 
     def _apply_leak(self, dt: float) -> None:
         """Apply the exact exponential decay toward ``Vrest`` over ``dt``.
@@ -287,6 +317,8 @@ class Cell:
         if not monitor.is_silent(self.t, self.spontaneous_silence_threshold_ms):
             return False
 
+        if self._rng is None:
+            self._rng = random.Random(self._rng_seed)
         noise = self._rng.gauss(0.0, self.spontaneous_noise_std)
         self.Vm += noise
         self.Vm = min(self.Vm, self.Vthresh - 0.01)

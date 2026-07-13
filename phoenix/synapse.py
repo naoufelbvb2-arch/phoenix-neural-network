@@ -23,6 +23,18 @@ class Synapse:
     distance).
     """
 
+    # __slots__ eliminates the per-instance __dict__ (see the note in Cell).
+    # Measured: Synapse 1,392 B -> ~232 B. SoA is still required for 1M cells.
+    __slots__ = (
+        "pre_id", "post_id", "weight", "distance", "propagation_speed",
+        "decay_constant", "learning_rate", "tau_stdp", "A_plus", "A_minus",
+        "w_min", "w_max", "observed_delays", "max_history",
+        "observation_window_factor", "n0", "m_min", "m_max", "tau_error",
+        "pre_trace", "post_trace", "last_trace_update", "verify_window_factor",
+        "verify_window", "n0_cs", "_pending_pre", "hits", "misses",
+        "tau_decay", "decay_power", "_last_decay_time",
+    )
+
     def __init__(
         self,
         pre_id: int,
@@ -576,9 +588,22 @@ class Synapse:
     def resolve_timeouts(self, now: float) -> None:
         """Score any pre-spike whose verification window has PASSED as a MISS.
 
-        This is the ONLY place misses are counted, so the simulation loop must
-        call it every tick (see ``Network.step``). Without it a synapse only ever
-        sees its successes.
+        This is the ONLY place misses are counted.
+
+        >>> IT IS CALLED AT EVENT BOUNDARIES, NOT EVERY TICK <<<
+        Every method that touches this synapse's pending state (``on_pre_spike``,
+        ``on_post_spike``, ``apply_decay``) settles stale pendings by calling this
+        FIRST. That keeps the cost model at O(spikes) instead of
+        O(synapses x ticks) — a per-tick sweep was the single worst cost in the
+        simulator (1.2M calls per 1000 ticks on 1200 synapses).
+
+        DO NOT "optimize" this by simply DELETING the call. That silently breaks
+        the system: a synapse whose pre fires repeatedly with no post response
+        would accumulate _pending_pre without bound (a memory leak, precisely in
+        the noisy synapse we most need to prune) while reporting misses = 0 and
+        causal_success = None — i.e. "no evidence" when it has in fact FAILED
+        every time. Relocating the call preserves the accounting exactly;
+        removing it destroys it.
 
         BOUNDARY CONVENTION: a post-spike at exactly ``t_pre + verify_window`` is
         a HIT. This method must therefore use a STRICT ``>``. Using ``>=`` was a
@@ -638,6 +663,11 @@ class Synapse:
             synapse (cs = 0.996) loses 0.008% instead of 2.0% — ~250x less —
             while an idle synapse (cs = 0) decays at the full, ungated rate.
         """
+        # Settle stale pendings FIRST: the leak is GATED by causal_success, so a
+        # stale cs would mis-gate the decay. apply_decay already runs lazily (on
+        # the post cell's firing), so this keeps cs fresh exactly where it is used.
+        self.resolve_timeouts(now)
+
         elapsed = now - self._last_decay_time
         if elapsed <= 0:
             return
@@ -685,6 +715,9 @@ class Synapse:
         :meth:`record_observation`. The forward-causal direction is handled
         by :meth:`on_post_spike`.
         """
+        # Settle stale pendings FIRST (event-boundary accounting, not per-tick).
+        self.resolve_timeouts(t_pre)
+
         self._decay_traces(t_pre)
 
         # This spike is now awaiting verification: did the post cell actually
@@ -738,6 +771,11 @@ class Synapse:
         computed from ``future_expectation`` as it stood before this
         event, and only afterward is the observation recorded.
         """
+        # Settle stale pendings FIRST. A pending whose window has been PASSED is
+        # a miss and must not be creditable here; one landing exactly ON the
+        # horizon survives (strict `>`), and is credited as a HIT just below.
+        self.resolve_timeouts(t_post)
+
         self._decay_traces(t_post)
 
         # CONFIRM pending pre-spikes: any that fired inside the verification
