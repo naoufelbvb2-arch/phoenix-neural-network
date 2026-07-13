@@ -28,6 +28,27 @@ from phoenix.spike import Spike
 from phoenix.synapse import Synapse
 
 
+def assembly_ignition_voltage(fan_in: int, weight: float) -> float:
+    """Voltage delivered to a cell when its fan-in bumps arrive (design-time check).
+
+    In the canonical CONVERGENT ring (delays ``hop, 2*hop, ..., F*hop``) every bump
+    lands on the SAME tick, because each earlier predecessor fires proportionally
+    sooner. The summed voltage is therefore simply ``fan_in * weight`` — INDEPENDENT
+    of ``hop`` and ``tau``, since there is no interval over which the membrane could
+    leak between bumps. See the convergent-ring convention in ``Network``.
+
+    Compare against ``Vthresh - Vrest`` (25 mV with the default cell) to check that
+    an assembly CAN IGNITE AT ALL, before attributing a dead ring to pruning. A
+    sub-threshold ring emits only its injected spikes and stops — it was never alive,
+    and mistaking that for a pruning failure is the likeliest misdiagnosis when
+    scaling the assembly.
+
+    Pure and stateless. Deliberately NOT wired into ``Network.step()``: this is a
+    design-time diagnostic, not part of the simulation loop.
+    """
+    return fan_in * weight
+
+
 class Network:
     """An arbitrary directed graph of ``Cell`` nodes connected by ``Synapse`` edges.
 
@@ -86,6 +107,63 @@ class Network:
     re-derive when scaling the assembly. Raising ``fan_in`` or ``hop`` requires
     raising ``tau_stdp`` (which widens the horizon), and that in turn weakens noise
     immunity — see the k-sweep in Synapse's verify_window notes.
+
+    Note constraint 2 is fatal exactly when the SURVIVORS are sub-threshold: losing
+    the deepest synapse collapses the fan-in F -> F-1, which kills the ring only if
+    ``(F - 1) * w < gap``. Verified: (F=2, w=20, hop=8) has a deepest latency of
+    16 ms (outside the horizon), so that synapse is pruned to cs = 0.0 and the lone
+    survivor delivers 20 mV < 25 mV — the ring DIES.
+
+    >>> CONVERGENT-RING CONVENTION (load-bearing, and previously implicit) <<<
+
+    Cell ``i`` is driven by its ``F`` predecessors with delays
+    ``hop, 2*hop, ..., F*hop``. Because predecessor ``i-k`` fires ``(k-1)*hop``
+    EARLIER, every bump arrives on the SAME tick:
+
+        source   fires at        delay      arrives at
+         i-1     T - 0*hop       1*hop      T + hop
+         i-2     T - 1*hop       2*hop      T + hop
+         i-3     T - 2*hop       3*hop      T + hop     <- ALL ON ONE TICK
+
+    The longer distance is exactly compensated by the earlier start. This is a
+    DELAY LINE — the same mechanism that lets the network discriminate temporal
+    order — and it is why fan-in can clear the 25 mV gap at all.
+
+    CONSEQUENCE — in the steady state, ignition is simply:
+
+        F * w  >=  Vthresh - Vrest   (= 25 mV by default)
+
+    INDEPENDENT of ``hop`` and ``tau``: there is no inter-bump interval, so there is
+    no inter-bump membrane leak. Use ``assembly_ignition_voltage`` below.
+
+    >>> DO NOT apply a staggered-arrival formula to the STEADY STATE <<<
+    ``V = sum(w * exp(-(F - k) * hop / tau))`` mispredicts this topology's steady
+    state — it wrongly calls (2,13,3), (2,13,5) and (3,9,2) dead; all three
+    reverberate (33.2 / 20.0 / 50.0 Hz).
+
+    BUT that formula is not meaningless: it is the IGNITION-TRANSIENT condition.
+    If the ring is ignited ALL AT ONCE (every seed cell at t=0), the first wave has
+    no compensating head start, so it genuinely DOES arrive staggered and leak, and
+    the transient obeys the staggered sum. Measured:
+
+        F  w  hop | F*w  V_stag | sequential  all-at-once
+        3  11   3 |  33   28.62 |    33.2 Hz     33.2 Hz
+        2  13   3 |  26   24.19 |    33.2 Hz      0.0 Hz   <- never lights
+        2  13   5 |  26   23.12 |    20.0 Hz      0.0 Hz   <- never lights
+        2  15   5 |  30   26.68 |    20.0 Hz     20.0 Hz
+
+    So: ``V_stag >= gap`` governs whether an all-at-once ring LIGHTS; ``F * w >= gap``
+    governs whether the travelling wave SUSTAINS. They coincide only when both clear
+    the gap.
+
+    >>> IGNITION PROCEDURE MATTERS <<<
+    Ignite SEQUENTIALLY — ``inject(cell i) at t = i * hop`` — to build the travelling
+    wave directly and bypass the staggered transient entirely. Igniting all cells at
+    t=0 can leave a perfectly viable ring dark forever.
+
+    A ring that fails to reverberate is NOT necessarily a pruning failure. Check
+    ignition FIRST (``F * w >= gap``, and the ignition procedure); a sub-threshold
+    ring emits only its injected spikes and stops — it was never alive.
     """
 
     def __init__(self, dt: float) -> None:

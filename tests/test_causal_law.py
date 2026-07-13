@@ -30,7 +30,7 @@ import statistics
 import pytest
 
 from phoenix.cell import Cell
-from phoenix.network_graph import Network
+from phoenix.network_graph import Network, assembly_ignition_voltage
 from phoenix.synapse import Synapse
 
 RING = 10          # cells in the assembly
@@ -488,3 +488,231 @@ def test_fan_in_depth_must_fit_inside_the_horizon() -> None:
 
     # The fan-in has collapsed 3 -> 2, so the assembly can no longer sustain itself.
     assert _cell_rate(bad_spikes, 0, 25_000, 30_000) == 0.0
+
+
+# ===========================================================================
+# [CD-3] The convergent-ring convention: simultaneity, ignition, and the
+# ignition PROCEDURE. These pin the property the whole assembly rests on.
+# ===========================================================================
+
+_PROBE = Cell(neuron_id=0)
+GAP = _PROBE.Vthresh - _PROBE.Vrest  # 25.0 mV, derived from the Cell itself
+
+
+def _tunable_ring(fan_in: int, weight: float, hop: float, *, run_ms: int = 30_000,
+                  sequential: bool = True) -> tuple[Network, list]:
+    """The canonical CONVERGENT ring, with fan_in / weight / hop free.
+
+    Synapse (i-k) -> i has delay k*hop. Because cell (i-k) fires (k-1)*hop earlier,
+    all F bumps arrive on the SAME tick — see Network's convergent-ring convention.
+
+    ``sequential=False`` ignites every seed cell at t=0 instead, which destroys that
+    compensation for the FIRST wave (see T3).
+    """
+    net = Network(dt=1.0)
+    for i in range(RING):
+        net.add_cell(Cell(neuron_id=i))
+    for i in range(RING):
+        for k in range(1, fan_in + 1):
+            net.add_synapse(_syn((i - k) % RING, i, weight, k * hop))
+
+    spikes: list = []
+    for _ in range(run_ms):
+        for i in range(fan_in):
+            ignite_at = i * hop if sequential else 0
+            if net.current_time == ignite_at:
+                net.inject(i, 100.0)
+        spikes.extend(net.step())
+    return net, spikes
+
+
+def _reverberates(spikes: list, run_ms: int) -> bool:
+    return _cell_rate(spikes, 0, run_ms - 5_000, run_ms) > 1.0
+
+
+# ---------------------------------------------------------------------------
+# T1. The property everything rests on: fan-in bumps arrive SIMULTANEOUSLY
+# ---------------------------------------------------------------------------
+def test_fan_in_bumps_arrive_simultaneously() -> None:
+    """The longer distance is exactly compensated by the earlier start.
+
+    Cell (i-k) fires (k-1)*hop earlier and its synapse has delay k*hop, so every
+    bump lands on tick T+hop regardless of k. This is a DELAY LINE, and it is the
+    reason fan-in can clear the 25 mV gap at all: with no interval between the
+    bumps, there is no inter-bump membrane leak.
+
+    If this ever stops holding, the ignition condition silently changes from
+    F*w >= gap to a leaky staggered sum, and assemblies that used to light will go
+    dark for no visible reason.
+    """
+    fan_in, weight, hop = 3, 11.0, 3.0
+    net, _ = _tunable_ring(fan_in, weight, hop, run_ms=200)
+
+    # Pending deliveries are (arrival_time, target_id, eff_weight, source_pre_id).
+    # Every target's queued fan-in deliveries must land on ONE tick.
+    by_target: dict[int, set[float]] = {}
+    for arrival_time, target_id, _weight, _source in net._pending:
+        by_target.setdefault(target_id, set()).add(arrival_time)
+
+    assert by_target, "expected deliveries in flight"
+    for target_id, arrivals in by_target.items():
+        assert len(arrivals) == 1, (
+            f"cell {target_id} has STAGGERED arrivals {sorted(arrivals)} — the "
+            "convergent-ring convention is broken"
+        )
+
+    # The physical consequence: the post cell's Vm jumps by ~F*w in ONE tick, not in
+    # F separate leaky steps.
+    #
+    # Probed with a deliberately SUB-THRESHOLD weight (3 x 5 = 15 mV < the 25 mV
+    # gap): a cell that actually fires is reset to Vreset by the same integrate()
+    # call, which would hide the very jump we are trying to observe. Cells 0/1/2 are
+    # injected sequentially, so cell 3 sees the genuine convergent fan-in.
+    probe_weight = 5.0
+    assert fan_in * probe_weight < 25.0  # stays sub-threshold: no reset, no hiding
+
+    probe = Network(dt=1.0)
+    for i in range(RING):
+        probe.add_cell(Cell(neuron_id=i))
+    for i in range(RING):
+        for k in range(1, fan_in + 1):
+            probe.add_synapse(_syn((i - k) % RING, i, probe_weight, k * hop))
+
+    jumps = []
+    previous = probe.cells[3].Vm
+    for _ in range(40):
+        for i in range(fan_in):
+            if probe.current_time == i * hop:
+                probe.inject(i, 100.0)   # sequential ignition
+        probe.step()
+        current = probe.cells[3].Vm
+        jumps.append(current - previous)
+        previous = current
+
+    # All three bumps land together: ONE tick carries the whole F*w rise...
+    assert max(jumps) == pytest.approx(fan_in * probe_weight, abs=0.5)  # ~15 mV
+    # ...and there is exactly one such arrival tick, not F staggered ones.
+    assert sum(1 for jump in jumps if jump > 1.0) == 1
+
+
+# ---------------------------------------------------------------------------
+# T2. Ignition is F * w — independent of hop and tau
+# ---------------------------------------------------------------------------
+def test_ignition_is_fan_in_times_weight() -> None:
+    """assembly_ignition_voltage(F, w) >= gap predicts reverberation exactly.
+
+    Including the two cases a staggered-leak formula got WRONG — (2,13) and (3,9)
+    both reverberate despite that formula calling them dead — and a genuinely
+    sub-threshold case, (2,12) = 24 mV < 25 mV, which is born dead.
+    """
+    assert GAP == 25.0
+
+    cases = [
+        (3, 11.0, 3.0, True),   # 33 >= 25
+        (2, 13.0, 3.0, True),   # 26 >= 25  <- a staggered-leak formula called this dead
+        (3, 9.0, 2.0, True),    # 27 >= 25  <- and this
+        (2, 15.0, 3.0, True),   # 30 >= 25
+        (2, 12.0, 3.0, False),  # 24  < 25  <- genuinely sub-threshold
+    ]
+    for fan_in, weight, hop, expect_alive in cases:
+        voltage = assembly_ignition_voltage(fan_in, weight)
+        assert voltage == fan_in * weight  # independent of hop and tau
+
+        run_ms = 30_000
+        _net, spikes = _tunable_ring(fan_in, weight, hop, run_ms=run_ms)
+
+        assert (voltage >= GAP) == expect_alive, f"prediction wrong: F={fan_in} w={weight}"
+        assert _reverberates(spikes, run_ms) == expect_alive, (
+            f"F={fan_in} w={weight} hop={hop} did not match prediction"
+        )
+
+    # The sub-threshold ring is BORN DEAD: only its injected spikes, then silence.
+    # Mistaking that for a pruning failure is the likeliest misdiagnosis when scaling.
+    _net, spikes = _tunable_ring(2, 12.0, 3.0, run_ms=30_000)
+    assert len(spikes) == 2
+
+
+# ---------------------------------------------------------------------------
+# T3. The ignition PROCEDURE matters (the trap that produced false numbers)
+# ---------------------------------------------------------------------------
+def test_sequential_ignition_is_required() -> None:
+    """Igniting all seed cells at t=0 can leave a perfectly viable ring dark forever.
+
+    SEQUENTIAL ignition (inject(i) at t = i*hop) builds the travelling wave directly,
+    so every bump is compensated and ignition is F*w.
+
+    ALL-AT-ONCE ignition fires the seeds together, so the FIRST wave has no head
+    start: it genuinely arrives STAGGERED and leaks, and that transient obeys
+    V_stag = sum(w * exp(-(F-k)*hop/tau)). If V_stag < gap the ring never lights AT
+    ALL — even though F*w >= gap and the travelling wave would sustain happily.
+
+    (2, 13, 3): F*w = 26 >= 25, but V_stag = 24.19 < 25.
+        sequential  -> 33.2 Hz
+        all-at-once ->  0.0 Hz
+
+    This is exactly why a staggered-leak formula once looked correct: measured under
+    all-at-once ignition it WAS correct — about the transient, not the steady state.
+    """
+    fan_in, weight, hop, run_ms = 2, 13.0, 3.0, 30_000
+
+    # It can SUSTAIN: F*w clears the gap.
+    assert assembly_ignition_voltage(fan_in, weight) >= GAP
+
+    # ...but the all-at-once transient does NOT clear it.
+    v_stag = sum(
+        weight * math.exp(-(fan_in - k) * hop / 20.0) for k in range(1, fan_in + 1)
+    )
+    assert v_stag < GAP
+    assert v_stag == pytest.approx(24.19, abs=0.01)
+
+    _net, sequential_spikes = _tunable_ring(
+        fan_in, weight, hop, run_ms=run_ms, sequential=True
+    )
+    _net, all_at_once_spikes = _tunable_ring(
+        fan_in, weight, hop, run_ms=run_ms, sequential=False
+    )
+
+    assert _reverberates(sequential_spikes, run_ms)        # lights and sustains
+    assert not _reverberates(all_at_once_spikes, run_ms)   # never lights at all
+    assert _cell_rate(all_at_once_spikes, 0, 25_000, 30_000) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# T4. The horizon constraint is fatal when the SURVIVORS are sub-threshold
+# ---------------------------------------------------------------------------
+def test_horizon_constraint_is_fatal_when_survivors_are_subthreshold() -> None:
+    """(F=2, w=20, hop=8): deepest latency 16 ms > the 10 ms horizon.
+
+    The deepest synapse is judged non-causal (cs = 0.0) and decayed away, collapsing
+    the fan-in 2 -> 1. The lone survivor delivers 20 mV < the 25 mV gap, so the ring
+    DIES.
+
+    Constraint 2 is therefore fatal exactly when (F - 1) * w < gap. It is a
+    MECHANISM, not an absolute prohibition: an assembly whose survivors still clear
+    the gap would limp on after losing its deepest synapse. (An earlier claim that
+    this specific configuration survives at 6 Hz was wrong — it dies.)
+    """
+    fan_in, weight, hop, run_ms = 2, 20.0, 8.0, 30_000
+    net, spikes = _tunable_ring(fan_in, weight, hop, run_ms=run_ms)
+
+    horizon = net.incoming[0][0].verify_window
+    assert fan_in * hop > horizon  # 16 > 10: the deepest synapse is out of sight
+
+    # It COULD have ignited — this is NOT a sub-threshold ring.
+    assert assembly_ignition_voltage(fan_in, weight) >= GAP  # 40 >= 25
+
+    deepest = [s for i in range(RING) for s in net.incoming[i]
+               if s.pre_id == (i - fan_in) % RING]
+    shallower = [s for i in range(RING) for s in net.incoming[i]
+                 if s.pre_id == (i - 1) % RING]
+
+    # The deepest synapse is judged pure noise and decayed away.
+    assert all(s.causal_success == 0.0 for s in deepest)
+    assert statistics.mean(s.weight for s in deepest) < statistics.mean(
+        s.weight for s in shallower
+    )
+
+    # Fan-in collapses 2 -> 1, and one 20 mV bump cannot clear the 25 mV gap.
+    assert (fan_in - 1) * weight < GAP
+    assert not _reverberates(spikes, run_ms)
+    assert _cell_rate(spikes, 0, 25_000, 30_000) == 0.0
