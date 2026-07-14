@@ -334,12 +334,24 @@ def test_future_expectation_equals_mean_observed_delay() -> None:
 
 def test_confidence_defensive_against_zero_mean_delay() -> None:
     synapse = Synapse(pre_id=1, post_id=2, weight=5.0, distance=1.0)
-    # record_observation can never produce a mean of exactly 0.0 (it only
-    # accepts observed_delay > 0), so simulate the otherwise-unreachable
-    # edge case directly to confirm the defensive guard, not a crash.
-    synapse.observed_delays = [0.0, 0.0]
 
-    assert synapse.confidence is None
+    # A mean of exactly 0.0 is UNREACHABLE through the public API: every path
+    # into observed_delays goes through record_observation, which rejects any
+    # delay <= 0. So this state can only be constructed by assigning the list
+    # directly — and that bypasses the running sums (_sum_delays /
+    # _sum_delays_sq), which record_observation owns and would normally maintain.
+    #
+    # [PERF-2] The sums are internal state; mutating observed_delays behind their
+    # back is NOT a supported operation. Rather than hide that with a resync hack
+    # inside the property (which would put an O(n) rescan back on the hot path,
+    # defeating the whole point), this test resyncs EXPLICITLY via the documented
+    # test-support escape hatch. If a future test needs to poke observed_delays,
+    # it must do the same.
+    synapse.observed_delays = [0.0, 0.0]
+    synapse._recompute_sums()
+
+    assert synapse.mean_observed_delay == 0.0  # the unreachable state, constructed
+    assert synapse.confidence is None          # and the guard holds: no ZeroDivision
 
 
 def test_prediction_error_none_with_no_prior_expectation() -> None:

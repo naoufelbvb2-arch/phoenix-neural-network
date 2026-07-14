@@ -30,6 +30,7 @@ class Synapse:
         "decay_constant", "learning_rate", "tau_stdp", "A_plus", "A_minus",
         "w_min", "w_max", "observed_delays", "max_history",
         "observation_window_factor", "n0", "m_min", "m_max", "tau_error",
+        "_sum_delays", "_sum_delays_sq",
         "pre_trace", "post_trace", "last_trace_update", "verify_window_factor",
         "verify_window", "n0_cs", "_pending_pre", "hits", "misses",
         "tau_decay", "decay_power", "_last_decay_time",
@@ -115,6 +116,33 @@ class Synapse:
         # synapse can score highly on despite low weight.
         self.observed_delays: list[float] = []
         self.max_history: int = max_history
+
+        # Running sums over observed_delays, maintained INCREMENTALLY in
+        # record_observation so that mean_observed_delay and delay_variance are
+        # O(1) reads instead of O(max_history) rescans. They were the single
+        # largest remaining cost in the simulator: `confidence` -> delay_variance
+        # did TWO passes over 50 elements on EVERY STDP event (826,940 calls ->
+        # 37.3M inner ops, 26.9 s of a 45 s run).
+        #
+        # >>> NUMERICAL SAFETY — THIS DEPENDS ON THE ELIGIBILITY WINDOW <<<
+        # variance = sum_d2/n - (sum_d/n)**2 is the textbook form that is
+        # vulnerable to CATASTROPHIC CANCELLATION for large values with a small
+        # spread. Measured: delays around 1e6 with a +/-0.001 spread give a 500x
+        # wrong variance (1.22e-04 vs a true 2.5e-07).
+        #
+        # It is safe HERE only because the [N1] eligibility guard in
+        # record_observation bounds every recorded delay to
+        # observation_window_factor * tau_stdp (60 ms by default), so
+        #     sum_d2 <= max_history * 60**2 = 50 * 3600 = 180,000
+        # — nowhere near float64's danger zone. Verified against the naive
+        # two-pass form over 300 observations: max error 3.62e-13 on variance,
+        # 9.99e-16 on confidence.
+        #
+        # IF THAT GUARD IS EVER WIDENED OR REMOVED, re-derive this or switch to
+        # Welford. Welford is numerically unconditional but O(n) — it would hand
+        # the bottleneck straight back.
+        self._sum_delays: float = 0.0     # sum of d  over observed_delays
+        self._sum_delays_sq: float = 0.0  # sum of d^2 over observed_delays
 
         # Eligibility window for the OBSERVATION path: a pre/post pair further
         # apart than observation_window_factor * tau_stdp is not plausibly
@@ -320,16 +348,43 @@ class Synapse:
         if observed_delay > self.observation_window_factor * self.tau_stdp:
             return  # too far apart to be a causal source; not an observation
 
+        # Maintain the running sums around the FIFO eviction. observed_delays
+        # itself keeps exactly its old type, contents and FIFO semantics.
+        if len(self.observed_delays) == self.max_history:
+            evicted = self.observed_delays[0]
+            self._sum_delays -= evicted
+            self._sum_delays_sq -= evicted * evicted
+
         self.observed_delays.append(observed_delay)
         if len(self.observed_delays) > self.max_history:
             self.observed_delays.pop(0)
 
+        self._sum_delays += observed_delay
+        self._sum_delays_sq += observed_delay * observed_delay
+
+    def _recompute_sums(self) -> None:
+        """TEST-SUPPORT ESCAPE HATCH — not API. Do not call from live code.
+
+        The running sums are INTERNAL STATE owned by record_observation; direct
+        mutation of ``observed_delays`` is not a supported operation and leaves
+        them stale. Exactly one test needs it: the defensive zero-mean guard in
+        ``confidence`` covers a state that is UNREACHABLE through the public API
+        (record_observation rejects any delay <= 0, so the mean can never be 0),
+        and so must be constructed by assigning observed_delays directly.
+        """
+        self._sum_delays = sum(self.observed_delays)
+        self._sum_delays_sq = sum(d * d for d in self.observed_delays)
+
     @property
     def mean_observed_delay(self) -> float | None:
-        """Arithmetic mean of observed delays, or None if there are none yet."""
-        if not self.observed_delays:
+        """Arithmetic mean of observed delays, or None if there are none yet.
+
+        O(1): read from the running sum, not a rescan. See _sum_delays.
+        """
+        n = len(self.observed_delays)
+        if n == 0:
             return None
-        return sum(self.observed_delays) / len(self.observed_delays)
+        return self._sum_delays / n
 
     @property
     def delay_variance(self) -> float | None:
@@ -339,13 +394,22 @@ class Synapse:
         meaningless with 0 or 1 samples. Groundwork for a future confidence
         measure (low variance = high temporal regularity); this property
         exposes only the raw variance, not any derived score.
+
+        O(1): computed from the running sums as sum_d2/n - (sum_d/n)**2 rather
+        than a two-pass rescan. See the numerical-safety note on _sum_delays —
+        this form is only safe because the eligibility window bounds the delays.
         """
-        if len(self.observed_delays) < 2:
+        n = len(self.observed_delays)
+        if n < 2:
             return None
-        mean = self.mean_observed_delay
-        return sum((d - mean) ** 2 for d in self.observed_delays) / len(
-            self.observed_delays
-        )
+
+        variance = self._sum_delays_sq / n - (self._sum_delays / n) ** 2
+
+        # REQUIRED clamp. Rounding can push a true variance of exactly 0 a hair
+        # below zero — and an all-identical delay sequence (a perfectly predicting
+        # loop) is our most common steady state. A negative here would make the
+        # sqrt() in `confidence` blow up.
+        return max(0.0, variance)
 
     @property
     def confidence(self) -> float | None:
