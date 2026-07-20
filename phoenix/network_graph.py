@@ -256,6 +256,15 @@ class Network:
         #     1000 ticks and then receives input evolves identically to one that
         #     was integrated every tick.
         #
+        #     COST CORRECTION: this skip is exact, but it does NOT make step() cost
+        #     O(spikes). The loop below still VISITS every cell every tick (measured
+        #     ~165 ns per silent cell, perfectly linear from N=2,500 to N=20,000), so
+        #     the true cost is O(N) + O(active * integrate_cost) — the skip lowers
+        #     the constant, not the order. Only synapse processing (resolve_timeouts,
+        #     event-driven) is genuinely O(spikes). For a true O(active) step the
+        #     silent cells must not be visited at all — that is what the vectorized
+        #     SoA layer (phoenix/soa.py) is for.
+        #
         #     SCOPE LIMIT: this is safe HERE only because homeostasis and
         #     spontaneous activity are NOT wired into Network.step(). Neither is
         #     dt-invariant (apply_homeostasis scales with dt; maybe_spontaneous_

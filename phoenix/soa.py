@@ -139,8 +139,19 @@ class SoANetwork:
     def __init__(self, dt: float = 1.0) -> None:
         self.dt = float(dt)
         self._cell_specs: list[tuple[int, dict]] = []
-        self._syn_specs: list[tuple[int, int, float, float, float, float]] = []
+        self._cell_id_set: set[int] = set()  # O(1) duplicate detection (was O(N))
         self._built = False
+
+        # Synapses are collected as ORDERED CHUNKS of parallel arrays, so the
+        # singular and bulk APIs share one global insertion order. Singular calls
+        # accumulate in a small buffer that is flushed to a chunk on the first
+        # bulk call and at build; a bulk call stores its arrays directly (no
+        # per-synapse Python tuples). Concatenating chunks in order, then a stable
+        # sort by source index, makes a mixed singular/bulk build byte-identical
+        # to a pure-singular one — which the heap tie-break, and therefore spike
+        # delivery order, depends on.
+        self._syn_chunks: list[tuple[np.ndarray, ...]] = []
+        self._syn_singular: list[tuple[int, int, float, float, float, float]] = []
 
         # Populated by _build(). Synapses are stored as PARALLEL ARRAYS in CSR
         # form (grouped by source index): _syn_indptr[idx]:_syn_indptr[idx+1]
@@ -160,19 +171,79 @@ class SoANetwork:
     def add_cell(self, neuron_id: int, **params: float) -> None:
         if self._built:
             raise RuntimeError("cannot add cells after the network is built")
-        if any(nid == neuron_id for nid, _ in self._cell_specs):
+        if neuron_id in self._cell_id_set:  # O(1) set lookup, not an O(N) scan
             raise ValueError(f"duplicate neuron_id {neuron_id}")
+        self._cell_id_set.add(neuron_id)
         self._cell_specs.append((neuron_id, params))
 
     def add_synapse(
         self, pre_id: int, post_id: int, weight: float, distance: float,
         propagation_speed: float = 1.0, decay_constant: float = 10.0,
     ) -> None:
+        """Add one synapse. Identical behaviour/signature to before; buffered so
+        it shares global insertion order with :meth:`add_synapses_bulk`."""
         if self._built:
             raise RuntimeError("cannot add synapses after the network is built")
-        self._syn_specs.append(
+        self._syn_singular.append(
             (pre_id, post_id, weight, distance, propagation_speed, decay_constant)
         )
+
+    def _flush_singular(self) -> None:
+        """Turn any buffered singular synapses into one chunk, in insertion order."""
+        if not self._syn_singular:
+            return
+        specs = self._syn_singular
+        self._syn_chunks.append((
+            np.array([s[0] for s in specs], dtype=np.int64),   # pre_id
+            np.array([s[1] for s in specs], dtype=np.int64),   # post_id
+            np.array([s[2] for s in specs], dtype=np.float64),  # weight
+            np.array([s[3] for s in specs], dtype=np.float64),  # distance
+            np.array([s[4] for s in specs], dtype=np.float64),  # propagation_speed
+            np.array([s[5] for s in specs], dtype=np.float64),  # decay_constant
+        ))
+        self._syn_singular = []
+
+    def add_synapses_bulk(
+        self, pre_ids, post_ids, weights, distances,
+        propagation_speed=1.0, decay_constant=10.0,
+    ) -> None:
+        """Add many synapses at once from arrays/lists (scalars broadcast).
+
+        Stores the arrays directly — no per-synapse Python tuples. Flushes the
+        singular buffer first so the global insertion order (singular -> bulk ->
+        singular) is preserved exactly.
+        """
+        if self._built:
+            raise RuntimeError("cannot add synapses after the network is built")
+
+        pre = np.asarray(pre_ids, dtype=np.int64).ravel()
+        post = np.asarray(post_ids, dtype=np.int64).ravel()
+        if pre.shape != post.shape:
+            raise ValueError(
+                f"pre_ids and post_ids must have the same length "
+                f"({pre.size} vs {post.size})"
+            )
+        m = pre.size
+
+        def bcast(value, name: str) -> np.ndarray:
+            arr = np.asarray(value, dtype=np.float64)
+            if arr.ndim == 0:
+                return np.full(m, float(arr), dtype=np.float64)
+            arr = arr.ravel()
+            if arr.size != m:
+                raise ValueError(
+                    f"{name} must be a scalar or length {m}, got length {arr.size}"
+                )
+            return arr
+
+        self._flush_singular()
+        self._syn_chunks.append((
+            pre, post,
+            bcast(weights, "weights"),
+            bcast(distances, "distances"),
+            bcast(propagation_speed, "propagation_speed"),
+            bcast(decay_constant, "decay_constant"),
+        ))
 
     def _build(self) -> None:
         ids = sorted(nid for nid, _ in self._cell_specs)
@@ -197,29 +268,68 @@ class SoANetwork:
             dt=self.dt,
         )
 
-        # Build parallel synapse arrays, sorted by source index (CSR).
-        edges = []  # (pre_idx, post_id, eff_w, delay)
-        for pre_id, post_id, weight, distance, prop_speed, decay in self._syn_specs:
-            if pre_id not in self._id2idx:
-                raise ValueError(f"synapse pre_id {pre_id} is not a registered cell")
-            if post_id not in self._id2idx:
-                raise ValueError(f"synapse post_id {post_id} is not a registered cell")
-            delay = distance / prop_speed
-            eff_w = weight * math.exp(-distance / decay)
-            edges.append((self._id2idx[pre_id], post_id, eff_w, delay))
+        # Vectorized synapse construction. Concatenate all chunks IN ORDER, so the
+        # arrays are in global insertion order (singular and bulk interleaved).
+        self._flush_singular()
+        ids_arr = np.asarray(ids, dtype=np.int64)  # sorted ascending == id2idx order
+        if self._syn_chunks:
+            pre_ids = np.concatenate([c[0] for c in self._syn_chunks])
+            post_ids = np.concatenate([c[1] for c in self._syn_chunks])
+            weights = np.concatenate([c[2] for c in self._syn_chunks])
+            distances = np.concatenate([c[3] for c in self._syn_chunks])
+            prop_speed = np.concatenate([c[4] for c in self._syn_chunks])
+            decay = np.concatenate([c[5] for c in self._syn_chunks])
+        else:
+            pre_ids = post_ids = np.empty(0, dtype=np.int64)
+            weights = distances = prop_speed = decay = np.empty(0, dtype=np.float64)
 
-        # Stable sort by source index preserves per-source insertion order, so
-        # fan-out enqueues edges in the same order the OOP adjacency list holds
-        # them — keeping heap tie-breaks (and thus delivery order) identical.
-        edges.sort(key=lambda e: e[0])
-        e = len(edges)
-        self._syn_post_id = np.array([x[1] for x in edges], dtype=np.int32)
-        self._syn_eff_w = np.array([x[2] for x in edges], dtype=np.float64)
-        self._syn_delay = np.array([x[3] for x in edges], dtype=np.float64)
+        # Validate against the sorted id array via searchsorted (not dict lookups
+        # in a loop). searchsorted gives the array index of a registered id; a
+        # position that is out of range, or whose id does not match, is unregistered.
+        pre_idx = np.searchsorted(ids_arr, pre_ids)
+        post_idx = np.searchsorted(ids_arr, post_ids)
+        pre_ok = (pre_idx < n) & (ids_arr[np.minimum(pre_idx, n - 1)] == pre_ids)
+        post_ok = (post_idx < n) & (ids_arr[np.minimum(post_idx, n - 1)] == post_ids)
+
+        # Report the FIRST offender in insertion order, pre before post within an
+        # edge (matching the original per-edge check order), verbatim message. E is
+        # the "none" sentinel.
+        e_count = pre_ids.size
+        first_bad_pre = int(np.argmax(~pre_ok)) if not pre_ok.all() else e_count
+        post_bad = pre_ok & ~post_ok  # only edges whose pre was fine
+        first_bad_post = int(np.argmax(post_bad)) if post_bad.any() else e_count
+        if first_bad_pre == e_count and first_bad_post == e_count:
+            pass  # all edges reference registered cells
+        elif first_bad_pre <= first_bad_post:
+            raise ValueError(
+                f"synapse pre_id {int(pre_ids[first_bad_pre])} is not a registered cell"
+            )
+        else:
+            raise ValueError(
+                f"synapse post_id {int(post_ids[first_bad_post])} is not a registered cell"
+            )
+
+        # Vectorized delay and effective weight. math.exp elementwise ON PURPOSE:
+        # math.exp and np.exp can differ by 1 ULP, and bit-exactness against the
+        # OOP layer is the whole value of this layer; exp is a small fraction of
+        # build cost. IEEE division is identical between numpy and Python, so the
+        # argument itself is safe to vectorize.
+        delay = distances / prop_speed
+        arg = -distances / decay
+        eff_w = weights * np.fromiter(
+            (math.exp(a) for a in arg), dtype=np.float64, count=arg.size
+        )
+
+        # Stable sort by source index -> CSR. Stable preserves insertion order for
+        # equal sources, keeping heap tie-breaks (delivery order) identical to the
+        # original singular build.
+        order = np.argsort(pre_idx, kind="stable")
+        self._syn_post_id = post_ids[order].astype(np.int32)
+        self._syn_eff_w = eff_w[order]
+        self._syn_delay = delay[order]
         indptr = np.zeros(n + 1, dtype=np.int64)
-        for pre_idx, _post, _w, _d in edges:
-            indptr[pre_idx + 1] += 1
-        self._syn_indptr = np.cumsum(indptr)
+        indptr[1:] = np.cumsum(np.bincount(pre_idx, minlength=n))
+        self._syn_indptr = indptr
 
         self._external = np.zeros(n, dtype=np.float64)
         self._built = True
