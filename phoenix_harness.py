@@ -155,7 +155,13 @@ def reset(net):
     c.refractory_until[:] = 0.0
     c.last_spike_time[:] = -np.inf
     c.t = 0.0
-    net._heap.clear()
+    # Delivery is a bucket ring now (was a heap). Empty every slot so no arrival
+    # survives across a reset. Fall back to _heap for older SoA builds.
+    if getattr(net, "_ring", None) is not None:
+        for slot in net._ring:
+            slot.clear()
+    elif getattr(net, "_heap", None) is not None:
+        net._heap.clear()
     net._external[:] = 0.0
 
 
