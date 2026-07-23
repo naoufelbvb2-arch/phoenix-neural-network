@@ -1,0 +1,57 @@
+{
+ "N": 2000,
+ "K": 40,
+ "target_hz": 13.0,
+ "log_sd": 0.3,
+ "obstruction": "full sweep not rate-matchable in any single weight regime (Result 11); high fan-out has zero-width band under uniform weights, low fan-out cannot reach target under log-normal weights",
+ "rows": [
+  {
+   "fan_out": 1,
+   "g_exc": 44.3369140625,
+   "calib_rate": 12.928333333333333,
+   "acc": 0.15833333333333335,
+   "acc_sd": 0.05931710140017396,
+   "floor": 0.008333333333333333,
+   "rate": 13.244666666666665,
+   "rate_sd": 0.8496479009304707,
+   "synapses": 2000,
+   "accs": [
+    0.20833333333333334,
+    0.19166666666666668,
+    0.075
+   ]
+  },
+  {
+   "fan_out": 2,
+   "g_exc": 30.3447265625,
+   "calib_rate": 13.783,
+   "acc": 0.10694444444444444,
+   "acc_sd": 0.036694013371174734,
+   "floor": 0.007407407407407408,
+   "rate": 13.539666666666667,
+   "rate_sd": 0.11032779442290301,
+   "synapses": 4000,
+   "accs": [
+    0.15833333333333333,
+    0.075,
+    0.0875
+   ]
+  },
+  {
+   "fan_out": 5,
+   "g_exc": 21.7939453125,
+   "calib_rate": 12.0,
+   "acc": 0.03333333333333333,
+   "acc_sd": 0.012266334536566453,
+   "floor": 0.008333333333333333,
+   "rate": 14.820333333333336,
+   "rate_sd": 4.611780302177843,
+   "synapses": 10000,
+   "accs": [
+    0.016666666666666666,
+    0.04583333333333333,
+    0.0375
+   ]
+  }
+ ]
+}
