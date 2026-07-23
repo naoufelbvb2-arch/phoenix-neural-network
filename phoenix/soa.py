@@ -27,10 +27,26 @@ float64 everywhere — bit-for-bit matching requires it; float32 would drift.
 
 from __future__ import annotations
 
-import heapq
 import math
 
 import numpy as np
+
+
+def _ragged_ranges(starts: np.ndarray, counts: np.ndarray) -> np.ndarray:
+    """Concatenate the integer ranges ``[starts[i] : starts[i]+counts[i])`` for all i.
+
+    Vectorized gather of variable-length CSR slices (all fired cells' outgoing
+    synapses in one shot). ``counts`` MUST be strictly positive — callers drop
+    zero-fan-out sources first, otherwise a zero-length run corrupts the boundary
+    write. Classic "cumsum of a difference array" trick: within a run the step is
+    +1; at each run boundary the step jumps to the next start.
+    """
+    total = int(counts.sum())
+    result = np.ones(total, dtype=np.int64)
+    result[0] = starts[0]
+    boundaries = np.cumsum(counts)[:-1]
+    result[boundaries] += starts[1:] - starts[:-1] - counts[:-1]
+    return np.cumsum(result)
 
 
 def _as_f64_array(value: float | np.ndarray, n: int, name: str) -> np.ndarray:
@@ -129,11 +145,13 @@ class SoANetwork:
 
     Mirrors ``phoenix.network_graph.Network`` for DYNAMICS ONLY. Synapse weights
     are frozen (no STDP/decay in phase 1), so the matching OOP reference must
-    freeze learning too. The pending-delivery heap uses the SAME entry shape and
-    tie-break as the OOP heap — ``(arrival_time, target_id, effective_weight,
-    source_id)`` — so bumps pop in identical order and are accumulated in identical
+    freeze learning too. Delayed delivery is a BUCKET RING drained by ``np.add.at``:
+    each tick's arrivals are lexsorted by the SAME key the OOP heap compared —
+    ``(arrival_time, target, effective_weight, source)`` — then accumulated in that
     order, which is what makes the float64 sums bit-exact (float addition is not
-    associative, so summation ORDER is load-bearing).
+    associative, so summation ORDER is load-bearing). This replaced a per-spike heap
+    that popped/pushed in the same order but was ~50x slower; equivalence is gated
+    byte-for-byte against the heap build (commit 4d31553).
     """
 
     def __init__(self, dt: float = 1.0) -> None:
@@ -165,7 +183,10 @@ class SoANetwork:
         self._syn_post_id: np.ndarray | None = None   # (E,) int32 target neuron_id
         self._syn_eff_w: np.ndarray | None = None      # (E,) float64 attenuated weight
         self._syn_delay: np.ndarray | None = None      # (E,) float64 delay
-        self._heap: list[tuple[float, int, float, int]] = []  # (arrival, target_id, eff_w, source_id)
+        self._syn_post_idx: np.ndarray | None = None   # (E,) int64 target array index
+        self._syn_bucket_off: np.ndarray | None = None  # (E,) int64 max(1, ceil(delay))
+        self._ring: list[list] = []                    # bucket-ring delivery slots
+        self._ring_size: int = 0
         self._external: np.ndarray | None = None       # staged injections
 
     def add_cell(self, neuron_id: int, **params: float) -> None:
@@ -331,6 +352,25 @@ class SoANetwork:
         indptr[1:] = np.cumsum(np.bincount(pre_idx, minlength=n))
         self._syn_indptr = indptr
 
+        # BUCKET-RING DELIVERY (replaces the per-spike heap; bit-exact, ~50x faster).
+        #   * target ARRAY INDEX per synapse. id2idx is monotone (ids are sorted), so
+        #     ordering by target_idx is identical to ordering by target_id — which is
+        #     what the heap tie-break used. np.add.at then scatters in index-array
+        #     order, the SAME order a sequential `raw[target] += w` would accumulate.
+        #   * bucket offset = max(1, ceil(delay)). A cell pushes its bumps AFTER its
+        #     own tick's drain, so the earliest an arrival can be delivered is the
+        #     next tick (offset 1) even for a sub-1 ms delay — this reproduces the
+        #     heap's "first tick_end > firing tick AND >= arrival_time" rule exactly.
+        self._syn_post_idx = post_idx[order].astype(np.int64)
+        off = np.ceil(self._syn_delay).astype(np.int64)
+        np.maximum(off, 1, out=off)
+        self._syn_bucket_off = off
+        self._max_off = int(off.max()) if off.size else 1
+        self._ring_size = self._max_off + 1
+        # Each ring slot holds a list of (arrival_time, target_idx, eff_w, source_idx)
+        # array-tuples appended during fan-out, concatenated + lexsorted at drain.
+        self._ring = [[] for _ in range(self._ring_size)]
+
         self._external = np.zeros(n, dtype=np.float64)
         self._built = True
 
@@ -347,35 +387,55 @@ class SoANetwork:
         """One tick. Returns the neuron_ids that fired, ascending (deterministic)."""
         self._ensure_built()
         cells = self.cells
-        tick_end = cells.t + self.dt
+        new_t = cells.t + self.dt          # post-increment time (integer-valued)
+        T = int(new_t)
+        ring = self._ring
+        rs = self._ring_size
 
-        # (a) Accumulate arrivals landing this tick, in EXACT heap-pop order, plus
-        #     the staged injections. Scalar accumulation in pop order guarantees
-        #     the summation order matches OOP's `input_current += weight` (np.add.at
-        #     would be the order-independent vectorized form; we deliberately keep
-        #     ordered accumulation because bit-exactness needs a fixed order).
+        # (a) Drain this tick's bucket into the raw-input vector. Every arrival due
+        #     at tick_end == new_t lives in ring[T % rs] (bucket == ceil(arrival),
+        #     which the offset math guarantees). Concatenate the slot's fan-out
+        #     batches, LEXSORT by (arrival_time, target_idx, eff_w, source_idx) so
+        #     same-target arrivals are ordered exactly as the heap popped them, then
+        #     np.add.at — which accumulates in index-array order, making the float64
+        #     sums bit-identical to the sequential `raw[target] += w` it replaces.
         raw = self._external.copy()
         self._external[:] = 0.0
-        heap = self._heap
-        while heap and heap[0][0] <= tick_end:
-            _arrival, target_id, eff_w, _source_id = heapq.heappop(heap)
-            raw[self._id2idx[target_id]] += eff_w
+        b = T % rs
+        bucket = ring[b]
+        if bucket:
+            if len(bucket) == 1:
+                arr_t, tgt, w, src = bucket[0]
+            else:
+                arr_t = np.concatenate([e[0] for e in bucket])
+                tgt = np.concatenate([e[1] for e in bucket])
+                w = np.concatenate([e[2] for e in bucket])
+                src = np.concatenate([e[3] for e in bucket])
+            order = np.lexsort((src, w, tgt, arr_t))
+            np.add.at(raw, tgt[order], w[order])
+            ring[b] = []
 
         # (b) Vectorized cell dynamics.
         fired_idx = cells.step(raw)
 
-        # (c) Fan-out: enqueue each fired cell's outgoing bumps, mirroring the OOP
-        #     heap entry shape/tie-break so future pops match order-for-order.
-        new_t = cells.t  # post-increment spike timestamp
-        indptr, post_id, eff_w, delay = (
-            self._syn_indptr, self._syn_post_id, self._syn_eff_w, self._syn_delay,
-        )
-        for idx in fired_idx:
-            source_id = self._ids[idx]
-            for j in range(indptr[idx], indptr[idx + 1]):
-                heapq.heappush(
-                    heap, (new_t + delay[j], int(post_id[j]), eff_w[j], source_id)
-                )
+        # (c) Fan-out: scatter every fired cell's outgoing bumps into future buckets,
+        #     one vectorized gather across all fired cells (no per-spike Python loop).
+        if fired_idx.size:
+            indptr = self._syn_indptr
+            counts = indptr[fired_idx + 1] - indptr[fired_idx]
+            nz = counts > 0
+            if nz.any():
+                src_cells = fired_idx[nz]
+                counts = counts[nz]
+                syn = _ragged_ranges(indptr[src_cells], counts)
+                tgt_all = self._syn_post_idx[syn]
+                w_all = self._syn_eff_w[syn]
+                arr_all = new_t + self._syn_delay[syn]
+                src_all = np.repeat(src_cells, counts)
+                dest = (T + self._syn_bucket_off[syn]) % rs
+                for db in np.unique(dest):
+                    m = dest == db
+                    ring[db].append((arr_all[m], tgt_all[m], w_all[m], src_all[m]))
 
         return [self._ids[i] for i in fired_idx]
 

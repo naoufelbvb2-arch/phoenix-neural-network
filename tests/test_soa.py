@@ -183,6 +183,51 @@ def test_soa_network_with_delays() -> None:
     assert soa_train == oop_train
 
 
+def test_soa_bucket_ring_scatter_uses_target_index_not_id() -> None:
+    """Regression: ring delivery must scatter to the target's ARRAY INDEX, not its id.
+
+    The bucket ring drains with ``np.add.at(raw, target_index, weight)``. If the
+    target NEURON ID is used as the index instead, a grid where id == index hides
+    it, but any id != index misroutes the bump. Here ids are widely spaced
+    (100,200,300,400) so id != index strongly, over the same sparse convergent-delay
+    construction as S4 (which is in the regime where SoA is bit-exact vs OOP): A,B
+    stagger-converge on C, C relays to D. A single misrouted bump changes the train.
+    """
+    id_a, id_b, id_c, id_d = 100, 200, 300, 400  # sorted -> indices 0,1,2,3 (id != index)
+
+    def build_oop() -> Network:
+        net = Network(dt=1.0)
+        for nid in (id_a, id_b, id_c, id_d):
+            net.add_cell(Cell(neuron_id=nid))
+        net.add_synapse(_frozen_syn(id_a, id_c, 15.0, 1.0))
+        net.add_synapse(_frozen_syn(id_b, id_c, 15.0, 2.0))
+        net.add_synapse(_frozen_syn(id_c, id_d, 30.0, 1.0))
+        return net
+
+    def build_soa() -> SoANetwork:
+        net = SoANetwork(dt=1.0)
+        for nid in (id_a, id_b, id_c, id_d):
+            net.add_cell(nid)
+        net.add_synapse(id_a, id_c, 15.0, 1.0, decay_constant=1000.0)
+        net.add_synapse(id_b, id_c, 15.0, 2.0, decay_constant=1000.0)
+        net.add_synapse(id_c, id_d, 30.0, 1.0, decay_constant=1000.0)
+        return net
+
+    oop, soa = build_oop(), build_soa()
+    oop_train: list[tuple[int, float]] = []
+    soa_train: list[tuple[int, float]] = []
+    for tick in range(60):
+        if tick == 0:
+            oop.inject(id_a, 100.0); oop.inject(id_b, 100.0)
+            soa.inject(id_a, 100.0); soa.inject(id_b, 100.0)
+        oop_train.extend((s.neuron_id, s.timestamp) for s in oop.step())
+        t_after = soa.cells.t + soa.dt
+        soa_train.extend((nid, t_after) for nid in soa.step())
+
+    assert any(nid == id_d for nid, _ in oop_train)  # the wave reached D via C
+    assert soa_train == oop_train                    # EXACT — misrouted bump would break it
+
+
 # ---------------------------------------------------------------------------
 # S5. dt-invariance / silent-cell exactness carries over to SoA
 # ---------------------------------------------------------------------------
