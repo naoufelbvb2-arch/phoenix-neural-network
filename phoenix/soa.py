@@ -9,8 +9,21 @@ SCOPE — PHASE 1: DYNAMICS ONLY (voltage, firing, delayed delivery). Learning
 (STDP / CST / decay) is intentionally NOT ported here; it is per-synapse,
 history-dependent, and hard to vectorize. It arrives in a separate SoA-2 step,
 only after dynamics equivalence is proven. So a matching OOP reference must have
-its learning frozen (``learning_rate=0`` and ``tau_decay=inf``), or use bare
-``Cell`` objects with no synapses at all.
+its learning frozen, or use bare ``Cell`` objects with no synapses at all.
+
+FREEZING AN OOP REFERENCE IS THREE THINGS, NOT TWO. ``learning_rate=0`` stops
+STDP potentiation and ``tau_decay=inf`` stops passive decay, but the weight
+BOUNDS are still enforced at runtime: ``Synapse.apply_decay`` runs unconditionally
+on every incoming synapse of a firing cell and applies ``max(w_min, ...)`` — so
+with the default ``w_min=0`` any NEGATIVE (inhibitory) weight is floored to 0 the
+first time its post cell fires, and ``w_max=20`` caps the excitatory tail via
+``update_weight``. A frozen reference carrying inhibition or heavy-tailed weights
+MUST therefore also lift the bounds (``w_min=-inf, w_max=+inf``); otherwise it
+silently deletes inhibition and truncates the tail and is NOT a valid oracle. This
+layer has no learning and never touches weights, so it is the faithful reference
+for a fixed signed/heavy-tailed net. See ``tests/test_soa.py`` for the E/I-regime
+equivalence gate. (Architectural corollary: the PLASTIC layer structurally cannot
+hold a negative weight under live plasticity — that is a real finding, not a knob.)
 
 >>> FOUR CRITICAL ORDERING DETAILS (each is bit-exact-or-nothing) <<<
 1. integrate order: leak `Vm = Vrest + (Vm-Vrest)*exp(-dt/tau)`, THEN add the

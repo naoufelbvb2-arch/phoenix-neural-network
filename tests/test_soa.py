@@ -134,11 +134,20 @@ def test_soa_multi_cell_spike_sequence() -> None:
 # ---------------------------------------------------------------------------
 def _frozen_syn(pre: int, post: int, weight: float, delay: float,
                 decay: float = 1000.0) -> Synapse:
-    """A synapse with learning frozen: weights never move (phase-1 dynamics only)."""
+    """A synapse with learning TRULY frozen: weights never move (phase-1 dynamics only).
+
+    Freezing is three things, not two. learning_rate=0 stops STDP and tau_decay=inf
+    stops passive decay, but the weight BOUNDS are still enforced at runtime:
+    apply_decay applies max(w_min, .) on every post-spike (default w_min=0 floors any
+    negative weight to 0), and update_weight clamps to [w_min, w_max]. So a faithful
+    oracle for signed / heavy-tailed weights MUST also lift the bounds — otherwise it
+    silently deletes inhibition and caps the tail. See soa.py module docstring.
+    """
     return Synapse(
         pre_id=pre, post_id=post, weight=weight, distance=delay,
         propagation_speed=1.0, decay_constant=decay,
         learning_rate=0.0, tau_decay=math.inf,
+        w_min=-math.inf, w_max=math.inf,
     )
 
 
@@ -226,6 +235,54 @@ def test_soa_bucket_ring_scatter_uses_target_index_not_id() -> None:
 
     assert any(nid == id_d for nid, _ in oop_train)  # the wave reached D via C
     assert soa_train == oop_train                    # EXACT — misrouted bump would break it
+
+
+def test_soa_matches_oop_with_inhibition_and_heavy_tail() -> None:
+    """Bit-exact vs OOP in the EXPERIMENTS' regime: E/I balance + heavy-tailed weights.
+
+    This is the regime the capacity runs use, and the one where a NAIVELY frozen OOP
+    reference (learning_rate=0, tau_decay=inf, but default bounds [0, 20]) diverges:
+    apply_decay's max(w_min=0, .) floors every inhibitory weight to 0 the first time
+    its post cell fires, and w_max=20 caps the heavy tail. _frozen_syn lifts the
+    bounds, so SoA (which never touches weights) and OOP match BIT-FOR-BIT. If this
+    ever diverges, a weight bound has crept back into the oracle. See soa.py docstring.
+    """
+    rng = random.Random(11)
+    n = 60
+    inh = {i for i in range(n) if rng.random() < 0.2}          # ~20% inhibitory
+
+    oop, soa = Network(dt=1.0), SoANetwork(dt=1.0)
+    for i in range(n):
+        oop.add_cell(Cell(neuron_id=i, tau=3.0, refractory_period=2.0))
+        soa.add_cell(i, tau=3.0, refractory_period=2.0)
+    for pre in range(n):
+        for _ in range(8):                                      # fan-out 8, recurrent
+            post = rng.randrange(n)
+            w = math.exp(rng.gauss(math.log(6.98) - 2.0, 2.0))  # log-normal, heavy tail (>20 occurs)
+            if pre in inh:
+                w *= -4.0                                       # inhibitory: NEGATIVE weight
+            dist = rng.uniform(1.0, 8.0)
+            oop.add_synapse(_frozen_syn(pre, post, w, dist, decay=20.0))
+            soa.add_synapse(pre, post, w, dist, decay_constant=20.0)
+
+    # sanity: the regime actually contains what would trip the bounds
+    has_neg = any(s.weight < 0 for outs in oop.outgoing.values() for s in outs)
+    has_heavy = any(s.weight > 20 for outs in oop.outgoing.values() for s in outs)
+    assert has_neg and has_heavy
+
+    drive = random.Random(5)
+    oop_train, soa_train = [], []
+    for _ in range(200):
+        for i in range(n):
+            if drive.random() < 0.02:
+                oop.inject(i, 30.0)
+                soa.inject(i, 30.0)
+        oop_train.extend((s.neuron_id, s.timestamp) for s in oop.step())
+        t_after = soa.cells.t + soa.dt
+        soa_train.extend((nid, t_after) for nid in soa.step())
+
+    assert len(oop_train) > 200                       # genuinely active recurrent E/I net
+    assert soa_train == oop_train                     # BIT-EXACT with bounds lifted
 
 
 # ---------------------------------------------------------------------------

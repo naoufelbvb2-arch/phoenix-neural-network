@@ -620,3 +620,58 @@ def test_update_weight_still_works_independently() -> None:
     synapse.update_weight(t_pre=10.0, t_post=15.0)
 
     assert synapse.weight > initial_weight
+
+
+# ---------------------------------------------------------------------------
+# INHIBITION UNDER LIVE PLASTICITY — a Task-3 prerequisite (delay plasticity
+# prototypes in the OOP layer at N~1000 on an E/I + log-normal architecture,
+# with learning ON, so the frozen-oracle bound-lifting does NOT apply here).
+#
+# DECISION (pinned by these tests): weight bounds are SIGNED BY TYPE. An
+# excitatory synapse is bounded [0, w_max]; an inhibitory synapse is bounded
+# [w_min, 0] with w_min < 0. Zero is the shared "off" bound; the active range
+# carries the synapse's sign. This is required because apply_decay applies
+# max(w_min, .) on every post-spike and update_weight clamps to [w_min, w_max]
+# — with the DEFAULT [0, w_max] an inhibitory weight is floored to 0 and then
+# STDP pushes it POSITIVE, silently converting inhibition into excitation.
+# ---------------------------------------------------------------------------
+def _drive_post_spikes(w_min: float, w_max: float, ticks: int = 60) -> float:
+    """Fire an inhibitory synapse's post cell `ticks` times with learning ON;
+    return the synapse's final weight. Uses the real Network path (apply_decay +
+    STDP fire exactly as they will in Task 3), not hand-called synapse methods."""
+    from phoenix.cell import Cell
+    from phoenix.network_graph import Network
+
+    net = Network(dt=1.0)
+    net.add_cell(Cell(neuron_id=0, tau=3.0, refractory_period=2.0))
+    net.add_cell(Cell(neuron_id=1, tau=3.0, refractory_period=2.0))
+    syn = Synapse(
+        pre_id=0, post_id=1, weight=-15.0, distance=2.0, propagation_speed=1.0,
+        decay_constant=20.0, learning_rate=0.05, tau_decay=20000.0,
+        w_min=w_min, w_max=w_max,
+    )
+    net.add_synapse(syn)
+    for _ in range(ticks):
+        net.inject(0, 30.0)   # fire pre
+        net.inject(1, 30.0)   # fire post -> triggers apply_decay on incoming + STDP
+        net.step()
+    return syn.weight
+
+
+def test_default_bounds_destroy_inhibition_under_live_plasticity() -> None:
+    """CONTRAST (documents the failure the decision fixes): with default [0, w_max]
+    bounds, a live inhibitory synapse is not merely erased — it is FLIPPED positive."""
+    final = _drive_post_spikes(w_min=0.0, w_max=20.0)
+    assert final >= 0.0            # inhibition destroyed
+    # and in practice STDP drives it strictly positive (inhibition -> excitation)
+    assert final > 0.0
+
+
+def test_signed_bounds_preserve_inhibition_under_live_plasticity() -> None:
+    """DECISION: inhibitory synapse bounded [w_min<0, 0] stays inhibitory across
+    repeated post-spikes with learning enabled. Plasticity may still MOVE the
+    weight (that is desired), but it must never cross zero into excitation."""
+    final = _drive_post_spikes(w_min=-20.0, w_max=0.0)
+    assert final < 0.0            # still inhibitory — survives
+    # unbounded-below variant behaves the same (the sign, not the magnitude, is the point)
+    assert _drive_post_spikes(w_min=-math.inf, w_max=0.0) < 0.0
