@@ -18,10 +18,26 @@ DESIGN: same lognormal config and readout/cue/lag/decoder as the capacity curve
 floor. Separate results file (task1_hardK_results.json) so this never collides with
 the pre-registered curve run. Resumable; K-sweep dedups on (N, condition, seed, K).
 
-Run at N=64,000 first (feasible, ~1-2 h/point). N=256,000 points are ~a day each and
-should be placed at the K the 64k sweep flags as the break, not sprayed blindly.
+PRE-REGISTERED BREAK CRITERION (fixed 2026-07-24, BEFORE any sweep row landed, so the
+break is not chosen after seeing the curve):
+    K_max(N) = the largest K at which lognormal accuracy >= 50%, obtained by LINEAR
+    INTERPOLATION between the two bracketing sweep points (the K just above and just
+    below the 0.50 crossing). The measured shuffled floor is reported at EVERY K.
+    The full accuracy-vs-K curve is reported, not just K_max — the shape is the result.
+
+PRE-REGISTERED SCALING TEST (the actual question — does capacity grow with N?):
+    Run the IDENTICAL sweep at N=16,000 and N=64,000. Compare K_max(64k) vs K_max(16k):
+      * K_max(64k) ~= 4 x K_max(16k)  -> capacity scales with N (linear).
+      * K_max flat across the 4x size step -> capacity does NOT scale with N.
+    This is confound-free: K_max is an absolute pattern count, so no chance-denominator
+    (1/K) enters the comparison at all. A 256k point, if run later, is a THIRD point
+    confirming the slope — never the sole evidence.
+
+Run 16k first (cheap: 16k rows were the fast ones), then 64k. N=256,000 points are ~a
+day each and are placed at the K the 16k/64k slope flags, not sprayed blindly.
 
 Usage:  python experiments/task1_hardK.py N [K ...] [--seeds s ...]
+        python experiments/task1_hardK.py --analyze         # compute K_max per (N,seed)
 """
 from __future__ import annotations
 
@@ -90,7 +106,59 @@ def run_one(n, condition, seed, K):
                 K_over_Nover200=K / max(1, n // 200))
 
 
+def kmax_interpolate(ks, accs, thresh=0.50):
+    """Pre-registered K_max: largest K with accuracy >= thresh, linear-interpolated
+    between the bracketing sweep points. Returns (kmax, note)."""
+    pts = sorted(zip(ks, accs))
+    ks = [k for k, _ in pts]; accs = [a for _, a in pts]
+    if accs[0] < thresh:
+        return None, f"already below {thresh:.0%} at smallest K={ks[0]} (acc {accs[0]:.1%}) — K_max < {ks[0]}"
+    if accs[-1] >= thresh:
+        return None, f"still >= {thresh:.0%} at largest K={ks[-1]} (acc {accs[-1]:.1%}) — K_max > {ks[-1]} (extend sweep)"
+    for i in range(len(ks) - 1):
+        if accs[i] >= thresh > accs[i + 1]:
+            # linear interpolation of the crossing in K
+            frac = (accs[i] - thresh) / (accs[i] - accs[i + 1])
+            return ks[i] + frac * (ks[i + 1] - ks[i]), f"crosses between K={ks[i]} ({accs[i]:.1%}) and K={ks[i+1]} ({accs[i+1]:.1%})"
+    return None, "no crossing found"
+
+
+def analyze():
+    if not os.path.exists(RESULTS):
+        print("no results yet"); return
+    with open(RESULTS) as f:
+        rows = json.load(f)
+    from collections import defaultdict
+    by = defaultdict(list)
+    for r in rows:
+        if r["condition"] == "lognormal":
+            by[(r["N"], r["seed"])].append((r["K"], r["accuracy"], r["floor"], r["rate_hz"]))
+    print("PRE-REGISTERED K_max = largest K with lognormal accuracy >= 50% (interpolated)\n")
+    kmax_by_N = defaultdict(list)
+    for (N, seed) in sorted(by):
+        pts = sorted(by[(N, seed)])
+        print(f"  N={N:,} seed={seed}:")
+        for K, acc, fl, rate in pts:
+            print(f"    K={K:>6} (={K/(N//200):5.1f}x N/200)  acc={acc:7.2%}  floor={fl:6.2%}  rate={rate:.1f}Hz")
+        km, note = kmax_interpolate([p[0] for p in pts], [p[1] for p in pts])
+        print(f"    -> K_max = {km if km is None else round(km,1)}  ({note})\n")
+        if km is not None:
+            kmax_by_N[N].append(km)
+    if len(kmax_by_N) >= 2:
+        Ns = sorted(kmax_by_N)
+        print("  SCALING:")
+        for N in Ns:
+            print(f"    K_max({N:,}) = {np.mean(kmax_by_N[N]):.0f}")
+        lo, hi = Ns[0], Ns[-1]
+        ratio = np.mean(kmax_by_N[hi]) / np.mean(kmax_by_N[lo])
+        nratio = hi / lo
+        print(f"    K_max ratio {hi//1000}k/{lo//1000}k = {ratio:.2f}x  (N ratio {nratio:.0f}x) "
+              f"-> {'scales with N' if ratio > 0.7*nratio else 'does NOT scale linearly with N'}")
+
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--analyze":
+        analyze(); return
     n = int(sys.argv[1])
     rest = sys.argv[2:]
     if "--seeds" in rest:
