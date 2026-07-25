@@ -53,8 +53,11 @@ from phoenix_harness import (  # noqa: E402
     accuracy, build, label_shuffled_floor, reset, _fingerprints,
 )
 
-RESULTS = os.path.join("experiments", "task1_hardK_results.json")
-TRIALS = 6
+# RESULTS + TRIALS are env-overridable so break-location points can run in PARALLEL
+# (own results file per process avoids the read-modify-write race) and, if desired, at
+# reduced trials for a fast scan. Default is the pre-registered config (own file, 6 trials).
+RESULTS = os.environ.get("HARDK_RESULTS", os.path.join("experiments", "task1_hardK_results.json"))
+TRIALS = int(os.environ.get("HARDK_TRIALS", "6"))
 LAG = 20
 WINDOW = 10
 N_TICKS = 50
@@ -64,9 +67,19 @@ CUE_W = 45.0
 JITTER = 2
 
 CONDITIONS = {
-    "lognormal": dict(fan_out=20, g_exc=6.98, log_sd=2.0, mode="rec"),
-    "fan_out_0": dict(fan_out=0,  g_exc=6.98, log_sd=2.0, mode="none"),
+    "lognormal":      dict(fan_out=20, g_exc=6.98, log_sd=2.0, mode="rec"),
+    "sparse_uniform": dict(fan_out=2,  g_exc=30.0, log_sd=0.3, mode="rec"),
+    "fan_out_0":      dict(fan_out=0,  g_exc=6.98, log_sd=2.0, mode="none"),
 }
+
+# CONFOUND CONTROLS: readout (default n//4) and cue (default n//25) both scale with N,
+# so a K_max that grows with N could be tracking those, not the network. These env
+# overrides PIN them to ABSOLUTE cell counts (e.g. the 16k values 4000 / 640) so the
+# same big network is read/cued exactly as the small one was. Also HARDK_COND selects
+# which condition(s) to sweep (default lognormal+fan_out_0 control).
+_READOUT_ABS = int(os.environ["HARDK_READOUT"]) if os.environ.get("HARDK_READOUT") else None
+_CUE_ABS = int(os.environ["HARDK_CUE"]) if os.environ.get("HARDK_CUE") else None
+_COND_SEL = [c for c in os.environ.get("HARDK_COND", "lognormal,fan_out_0").split(",") if c]
 
 
 def measure_rate(net, n, ticks=1500, seed=1234):
@@ -82,8 +95,8 @@ def measure_rate(net, n, ticks=1500, seed=1234):
 
 def run_one(n, condition, seed, K):
     kwargs = CONDITIONS[condition]
-    cue_size = max(1, n // 25)
-    readout = max(1, n // 4)
+    cue_size = _CUE_ABS if _CUE_ABS is not None else max(1, n // 25)
+    readout = _READOUT_ABS if _READOUT_ABS is not None else max(1, n // 4)
 
     t0 = time.perf_counter()
     net, _ = build(n, seed=seed, **kwargs)
@@ -131,29 +144,19 @@ def analyze():
     from collections import defaultdict
     by = defaultdict(list)
     for r in rows:
-        if r["condition"] == "lognormal":
-            by[(r["N"], r["seed"])].append((r["K"], r["accuracy"], r["floor"], r["rate_hz"]))
-    print("PRE-REGISTERED K_max = largest K with lognormal accuracy >= 50% (interpolated)\n")
-    kmax_by_N = defaultdict(list)
-    for (N, seed) in sorted(by):
-        pts = sorted(by[(N, seed)])
-        print(f"  N={N:,} seed={seed}:")
+        if r["condition"] == "fan_out_0":
+            continue  # the floor control, not a capacity curve
+        # key includes readout/cue so the confound controls are separated from the raw curve
+        key = (r["condition"], r["N"], r["seed"], r.get("readout"), r.get("cue_size"))
+        by[key].append((r["K"], r["accuracy"], r["floor"], r["rate_hz"]))
+    print("K_max = largest K with accuracy >= 50% (interpolated). readout/cue shown.\n")
+    for (cond, N, seed, ro, cu) in sorted(by):
+        pts = sorted(by[(cond, N, seed, ro, cu)])
+        print(f"  {cond} N={N:,} seed={seed} readout={ro} cue={cu}:")
         for K, acc, fl, rate in pts:
             print(f"    K={K:>6} (={K/(N//200):5.1f}x N/200)  acc={acc:7.2%}  floor={fl:6.2%}  rate={rate:.1f}Hz")
         km, note = kmax_interpolate([p[0] for p in pts], [p[1] for p in pts])
         print(f"    -> K_max = {km if km is None else round(km,1)}  ({note})\n")
-        if km is not None:
-            kmax_by_N[N].append(km)
-    if len(kmax_by_N) >= 2:
-        Ns = sorted(kmax_by_N)
-        print("  SCALING:")
-        for N in Ns:
-            print(f"    K_max({N:,}) = {np.mean(kmax_by_N[N]):.0f}")
-        lo, hi = Ns[0], Ns[-1]
-        ratio = np.mean(kmax_by_N[hi]) / np.mean(kmax_by_N[lo])
-        nratio = hi / lo
-        print(f"    K_max ratio {hi//1000}k/{lo//1000}k = {ratio:.2f}x  (N ratio {nratio:.0f}x) "
-              f"-> {'scales with N' if ratio > 0.7*nratio else 'does NOT scale linearly with N'}")
 
 
 def main():
@@ -176,12 +179,18 @@ def main():
         with open(RESULTS) as f:
             existing = json.load(f)
 
-    print(f"K-sweep at N={n:,} (N/200={n//200}); Ks={Ks}; seeds={seeds}\n", flush=True)
+    ro = f"readout={_READOUT_ABS}" if _READOUT_ABS is not None else "readout=n/4"
+    cu = f"cue={_CUE_ABS}" if _CUE_ABS is not None else "cue=n/25"
+    print(f"K-sweep at N={n:,} (N/200={n//200}); conds={_COND_SEL}; {ro}; {cu}; "
+          f"Ks={Ks}; seeds={seeds}\n", flush=True)
     for seed in seeds:
         for K in Ks:
-            for condition in CONDITIONS:
+            for condition in _COND_SEL:
                 done = any(r["N"] == n and r["condition"] == condition
-                           and r["seed"] == seed and r["K"] == K for r in existing)
+                           and r["seed"] == seed and r["K"] == K
+                           and r.get("readout") == (_READOUT_ABS if _READOUT_ABS is not None else max(1, n // 4))
+                           and r.get("cue_size") == (_CUE_ABS if _CUE_ABS is not None else max(1, n // 25))
+                           for r in existing)
                 if done:
                     print(f"  skip N={n} {condition} seed={seed} K={K} (done)", flush=True)
                     continue
@@ -189,9 +198,9 @@ def main():
                 existing.append(r)
                 with open(RESULTS, "w") as f:
                     json.dump(existing, f, indent=1)
-                print(f"  N={n:>7,} {condition:<10} seed={seed} K={K:>6} "
+                print(f"  N={n:>7,} {condition:<14} seed={seed} K={K:>6} "
                       f"(={r['K_over_Nover200']:.0f}x N/200)  acc={r['accuracy']:7.2%} "
-                      f"floor={r['floor']:6.2%} chance={r['chance']:.3%} "
+                      f"floor={r['floor']:6.2%}  readout={r['readout']} cue={r['cue_size']} "
                       f"rate={r['rate_hz']:.1f}Hz ({r['seconds']:.0f}s)", flush=True)
 
 
