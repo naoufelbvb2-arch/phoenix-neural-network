@@ -1,0 +1,32 @@
+[
+ {
+  "N": 64000,
+  "condition": "lognormal",
+  "seed": 0,
+  "K": 320,
+  "accuracy": 0.9197916666666667,
+  "floor": 0.0,
+  "floor_sd": 0.0,
+  "chance": 0.003125,
+  "rate_hz": 12.337572916666666,
+  "readout": 16000,
+  "cue_size": 2560,
+  "seconds": 1889.5310897000018,
+  "K_over_Nover200": 1.0
+ },
+ {
+  "N": 64000,
+  "condition": "fan_out_0",
+  "seed": 0,
+  "K": 320,
+  "accuracy": 0.0,
+  "floor": 0.0,
+  "floor_sd": 0.0,
+  "chance": 0.003125,
+  "rate_hz": 4.957291666666666,
+  "readout": 16000,
+  "cue_size": 2560,
+  "seconds": 408.29692480002996,
+  "K_over_Nover200": 1.0
+ }
+]

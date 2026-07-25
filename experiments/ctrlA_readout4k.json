@@ -1,0 +1,62 @@
+[
+ {
+  "N": 64000,
+  "condition": "lognormal",
+  "seed": 0,
+  "K": 40,
+  "accuracy": 0.6166666666666667,
+  "floor": 0.0,
+  "floor_sd": 0.0,
+  "chance": 0.025,
+  "rate_hz": 12.337572916666666,
+  "readout": 4000,
+  "cue_size": 2560,
+  "seconds": 160.54953279998153,
+  "K_over_Nover200": 0.125
+ },
+ {
+  "N": 64000,
+  "condition": "lognormal",
+  "seed": 0,
+  "K": 80,
+  "accuracy": 0.48333333333333334,
+  "floor": 0.0,
+  "floor_sd": 0.0,
+  "chance": 0.0125,
+  "rate_hz": 12.337572916666666,
+  "readout": 4000,
+  "cue_size": 2560,
+  "seconds": 301.99512520001736,
+  "K_over_Nover200": 0.25
+ },
+ {
+  "N": 64000,
+  "condition": "lognormal",
+  "seed": 0,
+  "K": 160,
+  "accuracy": 0.421875,
+  "floor": 0.0,
+  "floor_sd": 0.0,
+  "chance": 0.00625,
+  "rate_hz": 12.337572916666666,
+  "readout": 4000,
+  "cue_size": 2560,
+  "seconds": 632.8803689000197,
+  "K_over_Nover200": 0.5
+ },
+ {
+  "N": 64000,
+  "condition": "lognormal",
+  "seed": 0,
+  "K": 320,
+  "accuracy": 0.3359375,
+  "floor": 0.0,
+  "floor_sd": 0.0,
+  "chance": 0.003125,
+  "rate_hz": 12.337572916666666,
+  "readout": 4000,
+  "cue_size": 2560,
+  "seconds": 2039.3385356000508,
+  "K_over_Nover200": 1.0
+ }
+]

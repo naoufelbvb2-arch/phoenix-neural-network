@@ -1,0 +1,32 @@
+[
+ {
+  "N": 64000,
+  "condition": "sparse_uniform",
+  "seed": 0,
+  "K": 320,
+  "accuracy": 0.8229166666666666,
+  "floor": 0.0,
+  "floor_sd": 0.0,
+  "chance": 0.003125,
+  "rate_hz": 13.713229166666666,
+  "readout": 16000,
+  "cue_size": 2560,
+  "seconds": 427.21456289995695,
+  "K_over_Nover200": 1.0
+ },
+ {
+  "N": 64000,
+  "condition": "sparse_uniform",
+  "seed": 0,
+  "K": 1280,
+  "accuracy": 0.7234375,
+  "floor": 0.0,
+  "floor_sd": 0.0,
+  "chance": 0.00078125,
+  "rate_hz": 13.713229166666666,
+  "readout": 16000,
+  "cue_size": 2560,
+  "seconds": 3164.302639600006,
+  "K_over_Nover200": 4.0
+ }
+]
