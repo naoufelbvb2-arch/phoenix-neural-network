@@ -112,6 +112,25 @@ absent**. So:
 > over the same neurons wired as ~60 independent 16k modules. Capacity is modular and parallel;
 > global recurrence adds zero. The connected large network is not justified on capacity grounds.
 
+## Engineering payoff (the negative result is useful)
+
+If 60 independent 16k modules ≡ one 1M-cell connected network, then **horizontal scaling is free and
+bit-exact**: distributing across machines requires **zero cross-node communication**, and each module
+retains its bit-exactness locally (the reduction-order guarantee is only ever applied within a
+module). The discipline fork flagged earlier — that vectorized delivery breaks reduction-order
+equivalence at 10⁹ — **dissolves**: there is no 10⁹ connected object to keep bit-exact, only many 16k
+ones that already are. A dead scaling path for capacity is simultaneously a clean scaling path for
+deployment.
+
+**Caveat — mechanism not yet proven.** partitioned ≡ connected was PREDICTED from delay span (max
+delay 8 ms, readout at 20 ms, so >~2–3 hops cannot arrive in the window). The result is consistent
+with that but does not confirm it — a different cause could give the same outcome, and the
+distinction decides whether the limit is liftable. The extended-delay partition test (MAX_DELAY 8→24
+ms, readout lag 20→60 ms, everything else matched) discriminates: connected > partitioned with long
+delays ⇒ the limit was delay span, not scale (integration is reachable, delay range becomes the lever
+cell count never was); still equal ⇒ the limit is structural and integration is genuinely absent.
+RESULT: _pending._
+
 ## Mechanism
 
 A 4%-of-N cue read as a first-spike fingerprint off 25%-of-N cells means **both the signal and the

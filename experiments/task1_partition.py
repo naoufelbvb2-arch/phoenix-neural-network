@@ -42,11 +42,28 @@ N_BLOCKS = 4
 FAN_OUT = 20
 CUE = 2560          # 4% of N (640 per block)
 READOUT = 16000     # 25% of N (4000 per block)
-LAG, WINDOW, N_TICKS, TRIALS = 20, 10, 50, 6
+WINDOW, TRIALS = 10, 6
 P_DRIVE, DRIVE_W, CUE_W, JITTER = 0.005, 30.0, 45.0, 2
 
+# Delay span + readout lag are env-overridable for the EXTENDED-DELAY test, which
+# discriminates "integration is delay-limited" from "integration is structurally absent".
+# Raising MAX_DELAY lets more hops arrive; the readout lag must scale with it or the extra
+# hops land outside the window. N_TICKS must cover onset(~5) + lag + window. TAG separates
+# the extended results file from the 8 ms baseline. The SoA bucket ring auto-sizes to the
+# delay range, so no core change is needed.
+MAX_DELAY = float(os.environ.get("PART_MAXDELAY", "8"))
+# Longer delays spread the recurrent drive over more ticks and LOWER the rate (8 ms -> 12.4 Hz,
+# 24 ms -> 8.2 Hz at the same g). Rate-match by raising g_exc so the extended-delay net fires at
+# the SAME ~12.4 Hz — otherwise a rate difference, not the delay span, could drive the result.
+G_EXC = float(os.environ.get("PART_GEXC", "6.98"))
+LAG = int(os.environ.get("PART_LAG", "20"))
+N_TICKS = int(os.environ.get("PART_NTICKS", str(max(50, 5 + LAG + WINDOW + 10))))
+TAG = os.environ.get("PART_TAG", "")
 
-def build(mode, seed, g_exc=6.98, log_sd=2.0, g_ratio=4.0, f_inh=0.2, tau=3.0):
+
+def build(mode, seed, g_exc=None, log_sd=2.0, g_ratio=4.0, f_inh=0.2, tau=3.0):
+    if g_exc is None:
+        g_exc = G_EXC
     """One 64k net. mode='connected' -> global targets; 'partitioned' -> in-block targets.
     Weights/delays/E-I are the SAME draws either way; only the post indices differ."""
     rng = np.random.RandomState(seed)
@@ -54,8 +71,8 @@ def build(mode, seed, g_exc=6.98, log_sd=2.0, g_ratio=4.0, f_inh=0.2, tau=3.0):
     pre = np.repeat(np.arange(N), FAN_OUT)
     mu = np.log(g_exc) - log_sd ** 2 / 2.0
     w = rng.lognormal(mu, log_sd, len(pre))
-    d = rng.uniform(1.0, 8.0, len(pre))
     w[is_inh[pre]] *= -g_ratio
+    d = rng.uniform(1.0, MAX_DELAY, len(pre))
     blk = N // N_BLOCKS
     if mode == "connected":
         post = rng.randint(0, N, len(pre))
@@ -102,7 +119,7 @@ def kmax_interp(ks, accs, thresh=0.50):
 
 
 def results_path(mode):
-    return os.path.join("experiments", f"partition_{mode}.json")
+    return os.path.join("experiments", f"partition_{mode}{TAG}.json")
 
 
 def analyze():
