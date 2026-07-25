@@ -1,13 +1,25 @@
-# PRIMARY FINDING — the reservoir's storage does not scale with N
+# PRIMARY FINDING — a fixed-size readout extracts no additional capacity from a larger network
 
 **Question A (pre-registered):** does memory capacity keep growing with network size N?
-**Answer (controlled):** No. Per-cell storage is N-independent. The apparent capacity growth was
-the **readout** (25% of N) reading a larger stimulus off a larger cell population — not the
-network storing more. **Scaling this architecture buys no additional network capacity; the
-million-cell network is not justified on capacity grounds.**
+**Answer so far (controlled):** the apparent growth was the **readout** (25% of N) growing, not the
+network. Hold the readout at a fixed size and a 64k network — with a full, properly-scaled 4% cue —
+yields the same K_max as a 16k network (75.0 vs 78.5). The super-linear curve was the confound's
+signature.
 
-A negative result, and worth more than a positive would have been: it redirects the project off a
-dead scaling path, measured rather than assumed.
+**What this does and does NOT establish — read carefully.** A fixed 4,000-cell readout is 25% of
+the network at 16k but only 6.25% at 64k, so Control A also samples a 4× smaller *fraction*. That
+leaves two hypotheses it cannot separate:
+
+- **(a) the larger network stores no additional information**, or
+- **(b) it does, but a fixed-size readout cannot extract it.**
+
+**Our data establishes (b), not (a).** The write-up claims only (b); the stronger claim is not ours
+yet. This matters because in any brain-like system the readout *is* part of the architecture — a
+downstream area reads from a population — so scaling the readout with N is architecture, not
+confound. The real question therefore becomes: **does a 64k network with a 64k-scale readout beat
+four independent 16k networks with the same total readout?** That is the DECISIVE TEST (see
+"Partition test" below); it is what separates (a) from (b), and it is cheaper than any point run so
+far. Until it lands, the honest statement is (b): *a fixed-size readout buys nothing from scale.*
 
 ---
 
@@ -38,14 +50,35 @@ absolute 16k value on the 64k network and K_max re-measured.
 Control A curve: 61.7 → 48.3 → 42.2 → 33.6% at K = 40/80/160/320 → **K_max = 75.0** (interpolated
 50% crossing), statistically identical to the 16k network's **78.5**.
 
-**Control A is the proof.** A 64k network, driven by a full, properly-scaled 4% cue, with the
-readout held at the 16k size, stores exactly what the 16k network stored. Given an adequate cue,
-K_max tracks the **readout size**, not N. The network contributes nothing per cell.
+**Control A establishes (b).** A 64k network, full properly-scaled 4% cue, readout held at the 16k
+size → K_max = 75.0 ≡ 16k's 78.5. Given an adequate cue, the extracted K_max tracks the **readout
+size**, not N. (It does not prove the network stores no more — the fixed readout is also a 4×
+smaller fraction; see the Partition test.)
 
 Controls B and C (cue pinned to the absolute 16k value = 1% of 64k) collapse to floor while the
 network fires at a normal 12.3 Hz — a genuine collapse (floor measured = 0, not silence, not a
 decoder artifact): a 1% cue is too sparse to perturb the 64k net into decodable states. So the cue
 must be an adequate *fraction* to decode at all; given that, the readout drives the apparent scaling.
+
+## Partition test — the decisive experiment (separates (a) from (b))
+
+If the readout is legitimately part of the architecture, the honest question is whether **global
+connectivity** adds capacity. Compare, at matched cell count, synapse count, cue, and readout, the
+only difference being connectivity:
+
+- **Connected:** one 64k network. cue = 2560 (4%), readout = 16000 (25%).
+- **Partitioned:** four disconnected 16k blocks. cue = 640/block (2560 total), readout = 4000/block
+  (16000 total). Same cells, same synapse count, same cue and readout sets — synapses just never
+  cross block boundaries.
+
+- **Partitioned ≈ connected** → the big network is four small networks in a trenchcoat; global
+  recurrence adds nothing; scaling is pointless even with a scaled readout. This closes Question A
+  and promotes (b) toward (a) *for the integration claim specifically*.
+- **Connected > partitioned** → integration across scale contributes real capacity — the first
+  measured argument this project has produced *for* a large network.
+
+Measured at K = 80 / 320 / 1280 (K_max for both). RESULT: _pending — see the Partition result
+section once it lands._
 
 ## Mechanism
 
