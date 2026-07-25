@@ -1,0 +1,35 @@
+[
+ {
+  "mode": "partitioned",
+  "N": 64000,
+  "K": 80,
+  "seed": 0,
+  "accuracy": 0.9770833333333333,
+  "floor": 0.0,
+  "chance": 0.0125,
+  "rate_hz": 12.43390625,
+  "seconds": 296.37836249999236
+ },
+ {
+  "mode": "partitioned",
+  "N": 64000,
+  "K": 320,
+  "seed": 0,
+  "accuracy": 0.915625,
+  "floor": 0.0,
+  "chance": 0.003125,
+  "rate_hz": 12.43390625,
+  "seconds": 1093.2593738000141
+ },
+ {
+  "mode": "partitioned",
+  "N": 64000,
+  "K": 1280,
+  "seed": 0,
+  "accuracy": 0.8592447916666667,
+  "floor": 0.0,
+  "chance": 0.00078125,
+  "rate_hz": 12.43390625,
+  "seconds": 3653.2646699000034
+ }
+]
