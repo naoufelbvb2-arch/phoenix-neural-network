@@ -60,15 +60,20 @@ Controlling away the emergence claims leaves a coherent, positive picture.
   span**: raising the maximum delay 8→24 ms extends the memory horizon ~22→~40 ms (accuracy-vs-lag,
   rate-matched). Not plasticity, not scale, not connectivity — span.
 
-- **Two distributional facts, both better a priori than learned:**
-  - **Log-normal weights.** The weight spread the synaptic-scaling controller was credited with is
-    reproduced — better — by drawing weights log-normal at build time.
-  - **Long-skewed delays.** Task 3's real gain is a delay *distribution*: drawing delays from the
-    converged marginal (mean ~6.6 ms, ~⅓ at the 8 ms max) with **no training** recovers 85% of the
-    trained gain (5/5 seeds). Uniform 1–8 ms is a poor default.
+- **One SHAPE fact and one MAGNITUDE fact, both better a priori than learned:**
+  - **Log-normal weights (shape).** Matched on *mean* weight throughout, so it is genuinely the
+    spread that carries it: the weight distribution the synaptic-scaling controller was credited with
+    is reproduced — better — by drawing weights log-normal at build time.
+  - **Delay mean (magnitude).** Task 3's real gain is delay *magnitude*, not shape: a uniform delay
+    range at the right mean (uniform[5,8], mean 6.5) scores 80.7% where the default uniform[1,8]
+    (mean 4.5) scores 43.2% — and beats the trained rule's own output (68.2%), whose apparent
+    "long-skewed distribution" was a truncation pile-up at the delay bound. Lifting the bound
+    (MAX_DELAY 8→16) lets the mean climb 6.6→10.7 ms and accuracy rise to ~96%: arrival timing matched
+    to the readout lag, the delay-span lever. A local rule discovers this lever, but suboptimally.
 
-The pattern: the things that work in this architecture are **distributional and designed**. Learning
-and emergence, wherever claimed, were the measurement or the stimulus in disguise.
+The pattern: what works is **designed and distributional** — one shape result, one magnitude result,
+neither learned. Learning and emergence, wherever claimed, were the measurement or the stimulus in
+disguise.
 
 ## 4. The controls, as a reusable toolkit
 
