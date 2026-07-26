@@ -43,7 +43,7 @@ ETA_A = 0.15           # consensus step (proportional)
 ETA_B = 0.20           # speedup step (per-epoch, usage-weighted)
 ETA_RELAX = 0.05
 P_DRIVE, DRIVE_W, CUE_W, JITTER = 0.005, 30.0, 45.0, 2
-RESULTS = os.path.join("experiments", "task3_results.json")
+RESULTS = os.environ.get("TASK3_RESULTS", os.path.join("experiments", "task3_results.json"))
 
 
 # ----------------------------------------------------------------- net delay plumbing
