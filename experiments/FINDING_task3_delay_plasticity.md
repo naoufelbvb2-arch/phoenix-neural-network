@@ -71,20 +71,38 @@ matching the converged mean, but no skew, no pile-up):
 A clean uniform at the same mean **beats the rule by 12 points**. The skew is not a feature — the
 rule's 32%-at-8 pile-up is a **truncation artifact that actively hurts**.
 
-**MAX_DELAY = 16 re-convergence — the pile-up was the ceiling.** Lift the bound and let the rule
-re-converge: mean climbs 6.6 → **10.7 ms** with **0% at the new bound**, and accuracy rises 68% →
-**~96%** (5 seeds 92–98%). Longer delays time the cue-evoked arrivals into the readout window [12,22];
-the rule wanted delays > 8 ms and was truncated. This connects straight to the one measured lever,
-delay SPAN (8→24 ms extends the horizon ~22→~40 ms).
+**WITHDRAWN — the MAX_DELAY=16 → 96% number was RELAY, not memory.** The lag/span RATIO decides
+whether a delay measurement captures held memory or the relayed stimulus. The original protocol read
+at 2.5× the span (lag 20, span 8) deliberately, so the readout sits past a single hop. Task 3 was
+already at 1.5× (lag 12, span 8); MAX_DELAY=16 with lag still 12 is **0.75×** — the window sits INSIDE
+one hop, and at span 16 a single synaptic hop (delay up to 16) lands directly in [12+onset, 22+onset).
+Task-0-style check (fan_out=0 control + ratio sweep):
 
-> **The delay finding is MAGNITUDE, not shape:** arrival timing must be matched to the readout lag,
-> set by the *mean* delay (the span/horizon lever). Uniform 1–8 ms is a poor default only because its
-> mean is too short; a uniform range at the right mean is best of all. A local rule discovers this
-> lever — but *suboptimally*, converging to a truncated pile-up a clean uniform beats. This is **not**
-> a second shape finding; it is the same delay-span result, with a rule that finds it independently.
+| span | lag | ratio | fan_out=0 | recurrent |
+|---|---|---|---|---|
+| 8 | 12 | 1.50× | 0.1% | 49.1% |
+| 8 | 20 | **2.50×** | 0.2% | **8.2%** |
+| 16 | 12 | 0.75× | 0.1% | 55.1% |
+| 16 | 40 | **2.50×** | 0.3% | **1.2%** |
 
-(Reproduce: matched-mean and MAX_DELAY=16 controls are short scripts over `task3_delay_plasticity`'s
-`build`/`set_delays`/`train`/`evaluate`; numbers above are 5 seeds each.)
+At span 16's proper 2.5× ratio (lag 40) the recurrent net scores **1.2% (floor)**. So the 96% is
+withdrawn. More soberingly: **at 2.5× the network holds almost nothing at N=2000** (1–8%); the high
+accuracies all live at ratio ≤1.5×, i.e. 1–2 hops — the multi-hop memory here is shallow, and much of
+what reads as "memory" is few-hop relay reach.
+
+**What survives (matched-ratio):** at the SAME span=8, lag=12 (1.5×, ≥2-hop for both), a higher mean
+delay helps — uniform[5,8] (mean 6.5) = **80.7% ± 4.8** vs uniform[1,8] (mean 4.5) = **~46%**. That
+comparison holds the ratio constant, so it is not relay. Modest, genuine, magnitude not shape.
+
+> **PROVISIONAL.** This coda has been revised three times (long-skewed shape → mean not shape → relay
+> not memory). The revision rate is itself a signal that the delay-span lever has not stabilized. The
+> only clean statement right now: at MATCHED lag/span ratio, higher mean delay helps a little. Whether
+> raising the *span* buys real (multi-hop) memory is UNSETTLED and must be re-measured holding the
+> ratio constant (report lag/span with every delay number). Do not put a "delay-span" positive in the
+> write-up until that lands.
+
+(Reproduce: `build`/`set_delays`/`evaluate` over `task3_delay_plasticity`; ratio sweep above is 3
+seeds, matched-mean is 5 seeds.)
 
 ## Place in the pattern
 

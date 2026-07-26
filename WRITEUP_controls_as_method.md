@@ -56,24 +56,28 @@ consensus and use-dependent speedup) and 5 seeds each.
 Controlling away the emergence claims leaves a coherent, positive picture.
 
 - **The computational core is delay lines + coincidence detection** — designed, not emergent. It is
-  what every dissolved claim turned out to be "really" doing. Its one *measured* lever is the **delay
-  span**: raising the maximum delay 8→24 ms extends the memory horizon ~22→~40 ms (accuracy-vs-lag,
-  rate-matched). Not plasticity, not scale, not connectivity — span.
+  what every dissolved claim turned out to be "really" doing. Its candidate lever is the **delay
+  span** (raising max delay appears to extend the memory horizon), but this is **UNSETTLED**: the
+  lag/span RATIO decides whether a readout captures held memory or the relayed stimulus, and the
+  horizon numbers were read at *different* ratios. Whether span buys real multi-hop memory or just
+  extends few-hop relay reach must be re-measured holding the ratio constant. At a strict 2.5× ratio
+  the network holds little (1–8% at N=2000) — the multi-hop memory is shallow.
 
 - **One SHAPE fact and one MAGNITUDE fact, both better a priori than learned:**
   - **Log-normal weights (shape).** Matched on *mean* weight throughout, so it is genuinely the
     spread that carries it: the weight distribution the synaptic-scaling controller was credited with
     is reproduced — better — by drawing weights log-normal at build time.
-  - **Delay mean (magnitude).** Task 3's real gain is delay *magnitude*, not shape: a uniform delay
-    range at the right mean (uniform[5,8], mean 6.5) scores 80.7% where the default uniform[1,8]
-    (mean 4.5) scores 43.2% — and beats the trained rule's own output (68.2%), whose apparent
-    "long-skewed distribution" was a truncation pile-up at the delay bound. Lifting the bound
-    (MAX_DELAY 8→16) lets the mean climb 6.6→10.7 ms and accuracy rise to ~96%: arrival timing matched
-    to the readout lag, the delay-span lever. A local rule discovers this lever, but suboptimally.
+  - **Delay mean (magnitude) — provisional.** At a *matched* lag/span ratio (both span 8, lag 12), a
+    uniform range at a higher mean (uniform[5,8], mean 6.5) scores 80.7% vs the default uniform[1,8]
+    (mean 4.5) at ~46% — genuine, and magnitude not shape (the trained rule's apparent "long-skewed
+    distribution" was a truncation pile-up at the bound). But a larger claim — that lifting the span
+    keeps raising accuracy — was WITHDRAWN as a relay artifact: at the proper 2.5× ratio it is floor.
+    The settled part is small (higher mean helps a little at matched ratio); the span lever is unsettled.
 
-The pattern: what works is **designed and distributional** — one shape result, one magnitude result,
-neither learned. Learning and emergence, wherever claimed, were the measurement or the stimulus in
-disguise.
+The pattern: what works is **designed and distributional** — a shape result (log-normal weights) and,
+provisionally, a magnitude result (delay mean at matched ratio), neither learned. The delay-span lever
+is the project's one open positive and must be re-measured at fixed ratio before it is claimed.
+Learning and emergence, wherever claimed, were the measurement or the stimulus in disguise.
 
 ## 4. The controls, as a reusable toolkit
 
