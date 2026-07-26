@@ -51,6 +51,30 @@ this architecture"** a real claim rather than a report on one formulation.
 - Ceiling-checked operating point (51.7%, not saturated); 5 seeds (replication is the binding
   constraint); diagnostics reported pre+post.
 
+## POSITIVE CODA — the gain is a delay distribution, generable a priori (second of the log-normal class)
+
+Rule A took the task from 43.2% (uniform-random delays, rate-matched mean) to 68.2% (cue-trained).
+It is not cue memory — but a local rule found a better delay *configuration* than uniform-random.
+Characterize the converged delays and DRAW them into a fresh net with no training:
+
+| | uniform default | **direct-generation** (draw converged marginal, no training) | cue-trained |
+|---|---|---|---|
+| accuracy (5 seeds) | 43.2% | **64.5%** | 68.2% |
+
+**Direct-generation recovers 85% of the trained gain, 5/5 seeds** (in seed 3 it beats training). So
+the gain is a delay DISTRIBUTION, not plasticity. The distribution X is strikingly stable across
+seeds: **mean 6.62 ± 0.01 ms** (uniform default = 4.50), median 7.2, **~32% piled at the 8 ms max** —
+strongly long-skewed. Correlation of delay with post-cell fan-in ≈ −0.10, i.e. it is a marginal, not
+a wiring pattern. Mechanism ties straight to the one measured lever, delay SPAN: longer delays push
+the memory horizon out, lag=12 sits at the edge, so a long-skewed distribution reads better there.
+Rate-controlled (the rate-matched *uniform* baseline is 44.5%, so this is the distribution, not the
+lower rate from longer delays).
+
+> **Uniform 1–8 ms delays are a poor default. The useful delay distribution is long-skewed
+> (mean ~6.6 ms, ~⅓ at the max), and it needs no plasticity — just draw it** — exactly as log-normal
+> weights needed no controller (synaptic scaling). Two positives of the same class: the things that
+> work here are **distributional and designed**, not learned.
+
 ## Place in the pattern
 
 Entry six. Recurrence, STDP-as-gain, synaptic scaling, state-space order, capacity scaling, and now
