@@ -122,14 +122,28 @@ equivalence at 10⁹ — **dissolves**: there is no 10⁹ connected object to ke
 ones that already are. A dead scaling path for capacity is simultaneously a clean scaling path for
 deployment.
 
-**Caveat — mechanism not yet proven.** partitioned ≡ connected was PREDICTED from delay span (max
-delay 8 ms, readout at 20 ms, so >~2–3 hops cannot arrive in the window). The result is consistent
-with that but does not confirm it — a different cause could give the same outcome, and the
-distinction decides whether the limit is liftable. The extended-delay partition test (MAX_DELAY 8→24
-ms, readout lag 20→60 ms, everything else matched) discriminates: connected > partitioned with long
-delays ⇒ the limit was delay span, not scale (integration is reachable, delay range becomes the lever
-cell count never was); still equal ⇒ the limit is structural and integration is genuinely absent.
-RESULT: _pending._
+**Extended-delay test — mechanism DIAGNOSED (2026-07-26).** partitioned ≡ connected at 8 ms was
+predicted from delay span (max 8 ms, readout at 20 ms, so hops beyond ~2–3 miss the window). Re-run
+rate-matched at MAX_DELAY = 24 ms (g_exc 6.98→9.94 to hold 12.4 Hz). Two things resolve:
+
+*Memory horizon vs lag (K=80, accuracy):*
+
+| max delay | signal alive to | dies by |
+|---|---|---|
+| 8 ms | lag ~20 ms (97%) | lag 26 ms (6%) → 0 |
+| 24 ms | lag ~34 ms (98%) | lag 44 ms (23%) → lag 56 (0.6%) |
+
+*Connected vs partitioned at 24 ms (same lag curve):* identical at every lag (100/100/100/98/23/1 vs
+100/100/100/99/25/0) — the extended horizon is **within-block**, not cross-block.
+
+- **Confirmed (positive):** the memory horizon is delay-span-limited, and raising delays lifts it
+  (~22 ms → ~40 ms). This is the first lever the project has found that moves the core metric, and it
+  is exactly the variable delay plasticity (Task 3) acts on.
+- **Ruled out:** that delay span suppresses *integration*. If it did, longer delays would let
+  cross-block signals arrive and connected would beat partitioned — it does not. **Global integration
+  is structurally absent, independent of delay span.** Question A closed with the mechanism ruled out,
+  not assumed. (An earlier lag=60 ms run read past even the extended horizon and floored both arms —
+  a mis-set readout, not a result.)
 
 ## Mechanism
 
