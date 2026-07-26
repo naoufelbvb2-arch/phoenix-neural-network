@@ -18,26 +18,35 @@ Task 0 was the same relay trap).
   **feedforward arms recalibrated to the recurrent arm's rate** (only source cells project, so their
   synapse count and drive differ by construction).
 
-## Memory depth, MEASURED (graded feedforward chains — the binary→quantitative upgrade)
+## Memory depth, MEASURED (graded feedforward chains — quantitative, and non-tautological)
 
-"recurrent > 1-hop feedforward" only shows depth > 1. Instead build explicit acyclic feedforward
-chains of depth k = 1, 2, 3, 4 (disjoint layers A→B→C→…, no cycles) with the same delay generator and
-rate, and measure accuracy-vs-lag for each and for the recurrent net. **Memory depth = the smallest
-chain depth k whose accuracy-vs-(lag/mean_delay) curve matches the recurrent net's** (matches at the
-depth where recurrent's curve cliffs). That k is the held memory depth, in hops, measured not inferred.
+Build explicit acyclic feedforward chains of depth k = 1, 2, 3, 4 (disjoint layers A→B→C→…, no cycles)
+with the same delay generator and rate. A k-hop chain first delivers at ≈ k × mean_delay, so the chain
+that "matches" a given lag is largely fixed by k ≈ lag/mean_delay — searching for the *smallest
+matching* chain would just re-derive the lag, not measure memory. Non-tautological version: **at each
+lag, compare the recurrent net against the BEST chain over all k (max over k=1..4), not the first that
+matches.**
+- recurrent ≈ best-chain → pure feedforward propagation at that horizon; no held memory beyond a chain.
+- recurrent > best-chain → the recurrent net holds something **no feedforward structure of any depth**
+  achieves at that lag — genuine held memory.
+Also report **which k peaks** at each lag — the feedforward propagation depth, useful context for
+reading the recurrent number.
 
-## N-scaling — with the capacity confound CONTROLLED
+## N-scaling — inject the SAME signal at every N (calibrated cue), then measure propagation
 
-The apparent deeper horizon at 64k came from the capacity runs' readout=16000 / cue=2560 vs N=2000's
-500 / 80 — a 32× difference in features and stimulus, exactly what Control A/B showed inflates results
-on their own. So the decisive N arm holds **readout = 500 cells and cue = 80 cells ABSOLUTE across all
-N ∈ {2000, 16000, 64000}**. Measure whether the matching chain depth grows with N.
-- **Validity gate (mandatory):** at each N the absolute cue must produce decodable signal at 1 mean-hop
-  (short lag). If it is at floor there (cue washed out at large N — the Control B effect), that N point
-  is stimulus-limited, not memory-limited, and is reported as such, not as "shallow memory". Either way
-  it answers the practical question: does a bigger net hold more from the SAME input?
-- A fraction-scaled arm (readout=N/4, cue=N/25) is run alongside for contrast ONLY — it is the
-  confounded version and is labeled as such.
+The thing that must be held constant is *where the signal starts*. Neither absolute nor fraction-fixed
+cue does that: absolute starts weaker at large N (0.125% at 64k), fraction starts stronger (Control A).
+Fix: **calibrate cue size per N so 1-hop feedforward accuracy is matched across all N** (target 70% ±5;
+readout held at 500 absolute so observation is constant). Then depth is measured from a common
+baseline, and any cross-N difference in the fall-off with lag is **propagation, not injection**.
+- **Report the calibrated cue size per N as a result.** If 64k needs a much larger absolute cue just to
+  reach 70% at one hop, that is itself informative (and is the Control B effect, now quantified).
+- This **removes** the earlier validity-gate ambiguity: with 1-hop performance equalized, no N point is
+  stimulus-limited, so a flat depth-vs-N is "**can't hold more**" and is cleanly distinct from "can't
+  inject" — the distinction that has been the method all session. Do NOT merge the two.
+- A **fraction-scaled arm** (readout=N/4, cue=N/25) is run **alongside and reported side by side**, even
+  though it is the more flattering number — it is the confounded version, and the gap between "it looks
+  like it scales" (fraction) and "it flattens" (calibrated) is the finding.
 
 ## Delay generators (Task 4 folded in) — compared at MATCHED MEAN
 
@@ -54,10 +63,12 @@ as the low-mean reference.
 
 1. **Memory depth is shallow and single-hop-dominated at N=2000** — recurrent matches the 1- to 2-hop
    chain, not deeper.
-2. **The absolute-fixed N arm FLATTENS the scaling** — matching chain depth does not grow with N once
-   readout and cue are held absolute (and the large-N points likely hit the validity gate: cue=80
-   washed out). "Memory depth scales with N" is entry seven waiting to happen; the confounded
-   fraction-scaled arm will *look* like it scales, and that gap is the finding.
+2. **The calibrated N arm FLATTENS the scaling** — with 1-hop performance equalized across N (cue
+   calibrated, readout fixed), the recurrent-vs-best-chain gap does not grow with N: a bigger net holds
+   no more hops from an equal-strength input. "Memory depth scales with N" is entry seven waiting to
+   happen. The confounded fraction-scaled arm will *look* like it scales; the two are reported side by
+   side and that gap is the finding. (Secondary prediction: 64k needs a much larger calibrated cue to
+   reach 70% at 1 hop — the Control B washout, quantified.)
 3. **Generators match at matched mean** — distance-derived ≈ uniform[5,8]; spatial correlation adds
    nothing beyond the mean. Geometry closes as a delay-marginal generator.
 
