@@ -55,13 +55,14 @@ consensus and use-dependent speedup) and 5 seeds each.
 
 Controlling away the emergence claims leaves a coherent, positive picture.
 
-- **The computational core is delay lines + coincidence detection** — designed, not emergent. It is
-  what every dissolved claim turned out to be "really" doing. Its candidate lever is the **delay
-  span** (raising max delay appears to extend the memory horizon), but this is **UNSETTLED**: the
-  lag/span RATIO decides whether a readout captures held memory or the relayed stimulus, and the
-  horizon numbers were read at *different* ratios. Whether span buys real multi-hop memory or just
-  extends few-hop relay reach must be re-measured holding the ratio constant. At a strict 2.5× ratio
-  the network holds little (1–8% at N=2000) — the multi-hop memory is shallow.
+- **The computational core is a FEEDFORWARD delay line + coincidence detection** — designed, not
+  emergent, and (measured) not even essentially recurrent. It is what every dissolved claim turned out
+  to be "really" doing. The delay-span lever is **feedforward propagation depth, not held memory**: a
+  pure acyclic feedforward chain of the matching depth equals or beats the recurrent net at every
+  readout depth (100% vs 62% at 3 hops), across seeds, rate-matched, depth measured in mean-hops. The
+  recurrence — the property that made this a "recurrent network" — adds no capability a feedforward
+  delay line lacks, and slightly hurts (interference). This settles the last open positive: it's a
+  delay line.
 
 - **One SHAPE fact and one MAGNITUDE fact, both better a priori than learned:**
   - **Log-normal weights (shape).** Matched on *mean* weight throughout, so it is genuinely the
@@ -74,10 +75,10 @@ Controlling away the emergence claims leaves a coherent, positive picture.
     keeps raising accuracy — was WITHDRAWN as a relay artifact: at the proper 2.5× ratio it is floor.
     The settled part is small (higher mean helps a little at matched ratio); the span lever is unsettled.
 
-The pattern: what works is **designed and distributional** — a shape result (log-normal weights) and,
-provisionally, a magnitude result (delay mean at matched ratio), neither learned. The delay-span lever
-is the project's one open positive and must be re-measured at fixed ratio before it is claimed.
-Learning and emergence, wherever claimed, were the measurement or the stimulus in disguise.
+The pattern: what works is **designed and distributional** — a shape result (log-normal weights) and a
+magnitude result (delay mean at matched ratio), neither learned — read out by a **feedforward delay
+line** that needs no recurrence. Learning, emergence, and even recurrence, wherever claimed, were the
+measurement or the stimulus in disguise.
 
 ## 4. The controls, as a reusable toolkit
 
