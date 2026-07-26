@@ -56,13 +56,17 @@ consensus and use-dependent speedup) and 5 seeds each.
 Controlling away the emergence claims leaves a coherent, positive picture.
 
 - **The computational core is a FEEDFORWARD delay line + coincidence detection** — designed, not
-  emergent, and (measured) not even essentially recurrent. It is what every dissolved claim turned out
-  to be "really" doing. The delay-span lever is **feedforward propagation depth, not held memory**: a
-  pure acyclic feedforward chain of the matching depth equals or beats the recurrent net at every
-  readout depth (100% vs 62% at 3 hops), across seeds, rate-matched, depth measured in mean-hops. The
-  recurrence — the property that made this a "recurrent network" — adds no capability a feedforward
-  delay line lacks, and slightly hurts (interference). This settles the last open positive: it's a
-  delay line.
+  emergent. The delay-span lever is **propagation depth, not held recurrent memory.** Two measurements
+  fix its precise status, and they must be read together:
+  - vs a **1-hop** delay line, recurrence wins: past one hop the 1-hop line is at chance (20.0% ±0.0)
+    while the recurrent net holds 40.4% ±8.8. So **recurrence does buy reach beyond one hop.**
+  - vs **multi-hop feedforward chains** (k=1..4, matched depth), recurrence loses: a designed chain of
+    the matching depth equals or beats the recurrent net at every readout depth (100% vs 62% at 3
+    hops, rate-matched, depth in mean-hops, 3/3 seeds).
+  - Reconciled: **recurrence is an inefficient GENERATOR of multi-hop depth.** A random recurrent
+    topology produces multi-hop paths, but noisily and at a stability cost; an explicit chain delivers
+    the same depth deterministically, with none of it. Recurrence is not doing something feedforward
+    can't — it is doing the *same* thing, worse. The lever is delay-line depth, best obtained by design.
 
 - **One SHAPE fact and one MAGNITUDE fact, both better a priori than learned:**
   - **Log-normal weights (shape).** Matched on *mean* weight throughout, so it is genuinely the
@@ -104,7 +108,33 @@ bit-exact**: distribution across machines needs zero cross-node communication, a
 its numerical (reduction-order) guarantees locally. A dead scaling path for capacity is a clean
 scaling path for deployment.
 
-## 6. Scope and honesty
+## 6. The architectural consequence — the stability apparatus is unnecessary
+
+If recurrence is an inefficient way to get depth that design supplies directly, then everything the
+recurrence *cost* — measured this session — becomes optional. Recurrence produced: bistability with a
+zero-width operating band; metastable ignition after ~3000 ticks; homeostasis failing three ways;
+synaptic scaling that stabilised but damaged function; inhibition required only to stop runaway;
+per-spike delivery-order complexity in the event heap.
+
+A feedforward delay line has **none** of these. No cycles ⇒ no runaway ⇒ no ignition ⇒ **no
+homeostatic controller, no inhibition-for-stability, provable termination, trivial parallelism, and a
+firing rate that is a direct function of the input rather than an unstable equilibrium to be
+regulated.** The negative result on recurrence is therefore a large *positive* on architecture: the
+same computation, obtained by design, discards the entire stability apparatus the recurrent version
+needed. This is stated as implied by the measurements; the **constructive test** (§7) is what turns it
+from implication into demonstration.
+
+## 7. Constructive test (in progress) — build the implied architecture, run every benchmark
+
+Everything above is negative (X is not doing the work). The constructive form: build the architecture
+the analysis implies — an explicit feedforward delay-line + coincidence-detector network, **no cycles,
+no inhibition, no homeostasis, no plasticity**, log-normal weights, matched mean delay — and run it on
+every benchmark in the repo (memory span, K_max capacity, the lag/span ratio sweep) against the
+recurrent architecture. Matches or beats ⇒ the strongest confirmation, a dramatically simpler codebase,
+and a positive result rather than six negatives. Falls short somewhere ⇒ that gap is exactly where
+recurrence earns its keep — the one thing worth finding. *[Results filled in as they land.]*
+
+## 8. Scope and honesty
 
 These are results about *this* architecture (rate-coded readout, first-spike fingerprints, this delay/
 weight regime), not about spiking networks in general. The claim is not "learning cannot work in
