@@ -1,0 +1,18 @@
+18004cc
+=== fresh clone at HEAD; launching reproduce.py ===
+CLEAN-ROOM REPRODUCTION — regenerating headline numbers from committed seeds
+
+  [PASS] Entry 4: deleting recurrence does not degrade order separation (lag 20, past span)
+           published=recurrent ~= fan_out=0  measured=recurrent 21.5% ~= fan_out=0 20.1%  (it was reading delay lines, not stored order)
+  [PASS] Delay gain is MEAN (uniform[5,8] >> uniform[1,8], matched span, lag 12)
+           published=80.7% vs ~46%  measured=80.6% vs 44.1%  (shape ruled out; magnitude confirmed)
+  [PASS] Delay-span lever is feedforward (best-chain >= recurrent at depth 3)
+           published=recurrent ~62% <= best-chain ~99.5%  measured=recurrent 67.8% <= best-chain 99.4%  (recurrence adds no held memory)
+  [PASS] Constructive: feedforward MATCHES recurrent at fair (best-cell) readout, K=1280
+           published=recurrent ~98% == feedforward 100%  measured=recurrent 97.8% == feedforward 100.0%  (the 6x 'beat' was readout selection)
+  [PASS]   ...and feedforward is more readout-robust (random-300)
+           published=feedforward ~97% >> recurrent ~35%  measured=feedforward 97.5% >> recurrent 35.2%  
+  [PASS] Entry 6: delay plasticity carries no cue-specific structure (cue ~= random-trained)
+           published=cue 68.2% ~= random-trained 67.4%  measured=cue 70.1% ~= random-trained 68.1%  (fails the random-input control)
+
+=== 6/6 reproduced within tolerance (1627s) ===

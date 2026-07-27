@@ -165,6 +165,17 @@ encodings, tasks, or rules; this work is evidence about one system, not a verdic
 
 ### Reproduction (the control the paper applies to itself)
 
+Every number in this paper was produced by the same process that reports it. So the final control is
+clean-room reproduction: from a **fresh clone at HEAD**, `reproduce.py` regenerates each headline
+number from committed seeds and prints measured vs published, exiting non-zero on any mismatch. **Result:
+6/6 within tolerance, in 27 minutes** (measured / published): order refutation 21.5% ≈ 20.1%; delay
+gain is mean 80.6% vs 44.1% (pub 80.7% / ~46%); delay-span is feedforward, recurrent 67.8% ≤ best-chain
+99.4% (pub 62% / 99.5%); constructive feedforward == recurrent at fair readout 100% == 97.8% (pub 100%
+/ 98%), and feedforward readout-robust 97.5% >> 35.2% (pub 97% / 35%); entry-six delay plasticity cue
+70.1% ≈ random-trained 68.1% (pub 68.2% / 67.4%). The SoA compute layer is deterministic and bit-exact,
+so same seeds give the same numbers — which is the point. (`--full` extends the harness to the 16k/64k
+capacity and partition checks, hours-scale; seeds committed.)
+
 These are results about *this* architecture (rate-coded readout, first-spike fingerprints, this delay/
 weight regime), not about spiking networks in general. The claim is not "learning cannot work in
 SNNs"; it is that in this system, six specific emergence claims did not survive matched controls, and
