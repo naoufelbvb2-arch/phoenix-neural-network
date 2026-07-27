@@ -150,6 +150,21 @@ design, reproduces the recurrent architecture while discarding the entire stabil
 
 ## 8. Scope and honesty
 
+**The limits of the evidence, not just the claims.** One codebase, one implementation of each rule,
+synthetic tasks, no real data, a single rate-coded readout, one weight/delay regime. Numbers are means
+over ≥3–5 seeds at N ≤ 64,000. The *method* generalises; the *results* are about this architecture on
+these tasks. A different delay rule, a latency-coded readout, or real data could behave differently —
+none of that is tested here.
+
+**What the six dissolutions do NOT show.** They do not show that emergence fails in spiking networks,
+that these mechanisms fail in general, or that recurrence is useless. They show that *these
+formulations, in this architecture, on these tasks, produced nothing their matched controls did not* —
+and that a designed feedforward core reproduces the same behaviour more simply here. STDP, synaptic
+scaling, recurrent computation, and delay plasticity may each carry real structure under other
+encodings, tasks, or rules; this work is evidence about one system, not a verdict on the ideas.
+
+### Reproduction (the control the paper applies to itself)
+
 These are results about *this* architecture (rate-coded readout, first-spike fingerprints, this delay/
 weight regime), not about spiking networks in general. The claim is not "learning cannot work in
 SNNs"; it is that in this system, six specific emergence claims did not survive matched controls, and
