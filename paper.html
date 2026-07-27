@@ -1,0 +1,252 @@
+<!-- Controls as method — a methods paper on the Phoenix spiking network -->
+<title>What survives the controls</title>
+<style>
+  :root {
+    --paper:#F1F3F4; --surface:#FAFBFB; --ink:#17212B; --muted:#5C6873; --faint:#8A96A0;
+    --line:#D9DEE1; --line-strong:#C4CBCF;
+    --accent:#0C8286; --accent-soft:#0C828618; --accent-line:#0C828640;
+    --dissolved:#AC5138; --dissolved-soft:#AC513818;
+    --shadow:0 1px 2px rgba(20,30,40,.05), 0 8px 30px rgba(20,30,40,.05);
+    --serif: Charter, "Bitstream Charter", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+    --sans: "Helvetica Neue", Helvetica, Arial, system-ui, sans-serif;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper:#0B1013; --surface:#121A1F; --ink:#E3E9EC; --muted:#9AA6AE; --faint:#6C7880;
+      --line:#22303A; --line-strong:#2F404B;
+      --accent:#43CDD2; --accent-soft:#43CDD216; --accent-line:#43CDD238;
+      --dissolved:#DD8E77; --dissolved-soft:#DD8E7718;
+      --shadow:0 1px 2px rgba(0,0,0,.3), 0 10px 34px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="light"] {
+    --paper:#F1F3F4; --surface:#FAFBFB; --ink:#17212B; --muted:#5C6873; --faint:#8A96A0;
+    --line:#D9DEE1; --line-strong:#C4CBCF; --accent:#0C8286; --accent-soft:#0C828618;
+    --accent-line:#0C828640; --dissolved:#AC5138; --dissolved-soft:#AC513818;
+    --shadow:0 1px 2px rgba(20,30,40,.05), 0 8px 30px rgba(20,30,40,.05);
+  }
+  :root[data-theme="dark"] {
+    --paper:#0B1013; --surface:#121A1F; --ink:#E3E9EC; --muted:#9AA6AE; --faint:#6C7880;
+    --line:#22303A; --line-strong:#2F404B; --accent:#43CDD2; --accent-soft:#43CDD216;
+    --accent-line:#43CDD238; --dissolved:#DD8E77; --dissolved-soft:#DD8E7718;
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 10px 34px rgba(0,0,0,.35);
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; background:var(--paper); color:var(--ink); font-family:var(--serif);
+    font-size:19px; line-height:1.62; -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+  }
+  .wrap { max-width:720px; margin:0 auto; padding:0 26px; }
+  .measure { max-width:640px; }
+  p { margin:0 0 1.15em; }
+  a { color:var(--accent); text-underline-offset:2px; text-decoration-thickness:.06em; }
+  strong { font-weight:600; }
+  em { font-style:italic; }
+  .eyebrow {
+    font-family:var(--sans); font-size:12px; font-weight:600; letter-spacing:.16em;
+    text-transform:uppercase; color:var(--muted);
+  }
+  .mono { font-family:var(--mono); font-variant-numeric:tabular-nums; }
+
+  /* ---- hero ---- */
+  header.hero { padding:88px 0 34px; border-bottom:1px solid var(--line); }
+  .kicker { display:flex; gap:12px; align-items:center; margin-bottom:30px; }
+  .kicker .dot { width:7px; height:7px; border-radius:50%; background:var(--accent); box-shadow:0 0 0 4px var(--accent-soft); }
+  h1 {
+    font-family:var(--serif); font-weight:600; font-size:clamp(33px,6vw,52px);
+    line-height:1.06; letter-spacing:-.015em; text-wrap:balance; margin:0 0 .5em;
+  }
+  h1 .fade { color:var(--muted); }
+  .dek { font-size:21px; line-height:1.5; color:var(--muted); max-width:600px; margin:0; }
+  .trace { width:100%; height:52px; margin:38px 0 4px; display:block; overflow:visible; }
+
+  /* ---- section ---- */
+  section { padding:48px 0; border-bottom:1px solid var(--line); }
+  .sechead { display:flex; align-items:baseline; gap:14px; margin-bottom:26px; }
+  .sechead .num {
+    font-family:var(--sans); font-size:13px; font-weight:700; color:var(--accent);
+    letter-spacing:.04em; padding-top:5px; min-width:26px;
+  }
+  h2 { font-family:var(--serif); font-weight:600; font-size:27px; line-height:1.15; letter-spacing:-.01em; margin:0; text-wrap:balance; }
+  h3 { font-family:var(--sans); font-weight:700; font-size:14px; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); margin:34px 0 12px; }
+
+  .lead { font-size:21px; line-height:1.55; }
+  .lead strong { color:var(--ink); }
+
+  /* ---- dissolutions ---- */
+  .claims { list-style:none; margin:8px 0 0; padding:0; display:flex; flex-direction:column; gap:2px; }
+  .claim {
+    display:grid; grid-template-columns:26px 1fr; gap:14px; padding:18px 0;
+    border-top:1px solid var(--line);
+  }
+  .claim .idx { font-family:var(--mono); font-size:13px; color:var(--faint); padding-top:3px; }
+  .claim .body { }
+  .claim .name { font-weight:600; display:block; margin-bottom:3px; }
+  .claim .name .promise { color:var(--muted); font-weight:400; font-style:italic; }
+  .claim .control { font-size:16px; line-height:1.5; color:var(--muted); }
+  .claim .control b { color:var(--ink); font-weight:600; }
+  .pill {
+    display:inline-block; font-family:var(--sans); font-size:10.5px; font-weight:700;
+    letter-spacing:.1em; text-transform:uppercase; padding:3px 8px; border-radius:100px;
+    background:var(--dissolved-soft); color:var(--dissolved); border:1px solid var(--dissolved);
+    vertical-align:2px; margin-left:6px;
+  }
+
+  /* ---- data table ---- */
+  .tablewrap { overflow-x:auto; margin:22px 0; border:1px solid var(--line); border-radius:10px; background:var(--surface); box-shadow:var(--shadow); }
+  table { border-collapse:collapse; width:100%; font-family:var(--mono); font-size:14px; font-variant-numeric:tabular-nums; }
+  caption { text-align:left; font-family:var(--sans); font-size:12px; font-weight:600; letter-spacing:.05em; text-transform:uppercase; color:var(--muted); padding:14px 16px 0; }
+  th, td { padding:10px 16px; text-align:right; border-bottom:1px solid var(--line); white-space:nowrap; }
+  th:first-child, td:first-child { text-align:left; }
+  thead th { font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); font-weight:700; border-bottom:1px solid var(--line-strong); }
+  tbody tr:last-child td { border-bottom:none; }
+  td.ok { color:var(--accent); }
+  .num-em { color:var(--ink); font-weight:600; }
+
+  /* ---- callout / spine ---- */
+  .spine { background:var(--surface); border:1px solid var(--line); border-left:2px solid var(--accent); border-radius:8px; padding:22px 24px; margin:22px 0; box-shadow:var(--shadow); }
+  .spine h3 { margin-top:0; }
+  .spine ul { margin:0; padding-left:1.1em; }
+  .spine li { margin:.4em 0; font-size:17px; }
+
+  blockquote {
+    margin:22px 0; padding:4px 0 4px 22px; border-left:2px solid var(--accent-line);
+    font-size:20px; line-height:1.5; color:var(--ink); font-style:italic;
+  }
+  .toolkit { list-style:none; margin:0; padding:0; }
+  .toolkit li { padding:13px 0; border-top:1px solid var(--line); font-size:17px; }
+  .toolkit li:first-child { border-top:none; }
+  .toolkit b { color:var(--ink); }
+  .toolkit .t { font-family:var(--sans); font-size:13px; font-weight:700; letter-spacing:.02em; color:var(--accent); display:inline-block; min-width:0; }
+
+  footer { padding:40px 0 80px; color:var(--faint); font-family:var(--sans); font-size:13px; line-height:1.6; }
+  footer .repro { color:var(--accent); font-weight:600; }
+  .hr-note { font-size:15px; color:var(--muted); font-style:italic; }
+  ::selection { background:var(--accent-soft); }
+  a:focus-visible, [tabindex]:focus-visible { outline:2px solid var(--accent); outline-offset:3px; border-radius:2px; }
+  @media (max-width:560px){ body{font-size:18px;} .claim{grid-template-columns:20px 1fr;} }
+</style>
+
+<div class="wrap">
+  <header class="hero">
+    <div class="kicker"><span class="dot"></span><span class="eyebrow">Methods note · spiking neural networks · falsification</span></div>
+    <h1>What survives<br>the controls</h1>
+    <p class="dek">Six “self-organisation” claims in a temporal spiking network. Five looked positive. Every one dissolved under a matched control — and the small thing left standing is designed, not emergent.</p>
+    <svg class="trace" viewBox="0 0 720 52" fill="none" aria-hidden="true" preserveAspectRatio="none">
+      <line x1="0" y1="34" x2="720" y2="34" stroke="var(--line-strong)" stroke-width="1"/>
+      <g stroke="var(--accent)" stroke-width="2">
+        <path d="M40 34 v-20" /><path d="M132 34 v-20" /><path d="M255 34 v-20" />
+        <path d="M300 34 v-20" /><path d="M470 34 v-20" /><path d="M600 34 v-20" /><path d="M660 34 v-20" />
+      </g>
+      <g fill="var(--accent)"><circle cx="40" cy="14" r="3"/><circle cx="132" cy="14" r="3"/><circle cx="255" cy="14" r="3"/><circle cx="300" cy="14" r="3"/><circle cx="470" cy="14" r="3"/><circle cx="600" cy="14" r="3"/><circle cx="660" cy="14" r="3"/></g>
+    </svg>
+  </header>
+
+  <section>
+    <p class="lead measure"><strong>The thesis.</strong> In this temporal spiking network (“Phoenix”), the things that work are <em>designed and distributional</em> — not learned, not emergent. Six independent emergence claims each began as a number well above chance, or a structure that appeared to arise from the network’s own dynamics. Each was real as a number and false as an explanation. The matched control — a condition identical in every respect except the one the claim credits — is what separated the two. The controls are the method; the surviving core is the result; and the fact that five of the six looked positive <em>before</em> controlling is the argument for the method.</p>
+  </section>
+
+  <section>
+    <div class="sechead"><span class="num">01</span><h2>A matched control is not optional — it is the experiment</h2></div>
+    <p class="measure">A recurring failure mode made this essential: the natural “destroy-the-structure” control — a shuffle — is too weak. It was the <em>stricter</em> controls that did the work: rate-matching, a random-input training arm, network partitioning, direct a-priori generation. Where a shuffle would have certified a positive, the stricter control dissolved it. Twice this happened to results the author was hoping to keep — including the constructive positive below.</p>
+  </section>
+
+  <section>
+    <div class="sechead"><span class="num">02</span><h2>Six claims, six dissolutions</h2></div>
+    <ol class="claims">
+      <li class="claim"><span class="idx">1</span><div class="body">
+        <span class="name">Recurrent computation <span class="pill">dissolved</span></span>
+        <span class="control"><span class="promise">promised: state-space separation.</span> Dissolved by a rate- and structure-matched feed-forward control — it was <b>delay lines, not recurrence</b>.</span></div></li>
+      <li class="claim"><span class="idx">2</span><div class="body">
+        <span class="name">STDP learns a useful gain <span class="pill">dissolved</span></span>
+        <span class="control"><span class="promise">promised: 92% “pinned at w_max”.</span> The <b>random-input arm</b> scored identically on noise; the 92% was the weight clamp doing its job.</span></div></li>
+      <li class="claim"><span class="idx">3</span><div class="body">
+        <span class="name">Synaptic scaling shapes weights <span class="pill">dissolved</span></span>
+        <span class="control"><span class="promise">promised: a useful weight spread.</span> The spread is <b>better drawn a priori</b> (log-normal) than produced by the controller.</span></div></li>
+      <li class="claim"><span class="idx">4</span><div class="body">
+        <span class="name">State space encodes order <span class="pill">dissolved</span></span>
+        <span class="control"><span class="promise">promised: 100% order separation.</span> Delete all recurrent synapses → separation <b>unchanged</b>. It was reading delay lines.</span></div></li>
+      <li class="claim"><span class="idx">5</span><div class="body">
+        <span class="name">Capacity scales with network size <span class="pill">dissolved</span></span>
+        <span class="control"><span class="promise">promised: super-linear K<sub>max</sub> growth.</span> Pin the readout / partition into blocks → a connected 64k net <b>equals four disconnected 16k blocks</b>.</span></div></li>
+      <li class="claim"><span class="idx">6</span><div class="body">
+        <span class="name">Delay plasticity learns cue structure <span class="pill">dissolved</span></span>
+        <span class="control"><span class="promise">promised: 43%→68% from a local rule.</span> The <b>random-input arm</b> matched it; the gain is a delay <b>distribution</b>, not learning.</span></div></li>
+    </ol>
+    <p class="measure" style="margin-top:28px">Two are worth stating in full, because the strict control reversed a result a shuffle would have passed.</p>
+    <h3>Capacity — the partition test</h3>
+    <p class="measure">From 16k→64k, capacity (K<sub>max</sub>, patterns held at ≥50%) grew super-linearly — apparently a strong case for scale. But three things grew at once: the network, the readout (25% of N), and the cue (4% of N). Hold the readout at the 16k size and K<sub>max</sub> returns to the 16k value; and a connected 64k network scores <em>identically</em> to four <em>disconnected</em> 16k blocks — 85.7% vs 85.9% at K=1280 — with matched cells, synapses, cue and readout. Global connectivity contributes nothing. The large network is four small ones in a trenchcoat.</p>
+    <h3>Delay plasticity — the random-input arm</h3>
+    <p class="measure">A local, post-spike-free delay rule took a memory task from 43% to 68%. It beats the shuffle control, so a shuffle-only design would have called it the project’s first survivor. Train the same rule on <em>random input</em> and evaluate on the cues: it scores the same (67%). The structure is real but not cue-specific. Confirmed across two orthogonal rules, five seeds each.</p>
+  </section>
+
+  <section>
+    <div class="sechead"><span class="num">03</span><h2>What survives</h2></div>
+    <p class="measure">Controlling the claims away leaves a coherent, positive picture — small, designed, temporal.</p>
+    <div class="spine">
+      <h3>The surviving core</h3>
+      <ul>
+        <li>A <strong>feedforward delay-line + coincidence detector</strong> — what every dissolved claim turned out to be really doing.</li>
+        <li><strong>Log-normal weights</strong> — a <em>shape</em> fact, matched on mean throughout, better drawn than learned.</li>
+        <li><strong>Delay mean</strong> — a <em>magnitude</em> fact: arrival timing matched to the readout lag, reported at a fixed lag/span ratio.</li>
+      </ul>
+    </div>
+    <p class="measure">On the delay lever specifically, two measurements must be read together. Versus a <em>one-hop</em> line, recurrence wins (40.4% vs chance). Versus <em>multi-hop chains</em> of matched depth, it loses (a designed chain equals or beats it at every depth, 100% vs 62% at three hops). Reconciled: recurrence is an <em>inefficient generator</em> of multi-hop depth — the same thing a chain does deterministically, only noisier and at a stability cost. The lever is delay-line depth, best obtained by design.</p>
+  </section>
+
+  <section>
+    <div class="sechead"><span class="num">04</span><h2>The controls, as a reusable toolkit</h2></div>
+    <ul class="toolkit measure">
+      <li><span class="t">Rate-matching.</span> Match firing rate between conditions — to the <em>post-manipulation</em> rate. Rate differences masquerade as structure.</li>
+      <li><span class="t">Random-input arm.</span> Train the rule on random input, evaluate on the task. Separates learning from a generic parameter drift. Dissolved claims 2 and 6.</li>
+      <li><span class="t">Partition.</span> Compare a structure against the same units with the structure removed. Dissolved claim 5’s integration reading.</li>
+      <li><span class="t">Direct generation.</span> If a rule “learns” a configuration, draw it directly and see if the gain survives. Turned claims 3 and 6 into distributional facts.</li>
+      <li><span class="t">Watch the readout.</span> Readout size and stimulus size both scale with N and both inflate results — the confound behind claim 5, and behind a retracted result below.</li>
+    </ul>
+  </section>
+
+  <section>
+    <div class="sechead"><span class="num">05</span><h2>The stability apparatus is unnecessary</h2></div>
+    <p class="measure">If recurrence is an inefficient way to get depth that design supplies directly, everything the recurrence <em>cost</em> becomes optional. Recurrence produced, all measured here: bistability with a zero-width operating band; metastable ignition after ~3000 ticks; homeostasis failing three ways; synaptic scaling that stabilised but damaged function; inhibition required only to stop runaway; per-spike delivery-order complexity.</p>
+    <p class="measure">A feedforward delay line has <strong>none</strong> of these — no cycles, so no runaway, so no ignition, so no homeostatic controller, no inhibition-for-stability, provable termination, trivial parallelism, and a firing rate that is a direct function of the input rather than an equilibrium to be regulated. The negative on recurrence is a large positive on architecture.</p>
+  </section>
+
+  <section>
+    <div class="sechead"><span class="num">06</span><h2>The constructive test</h2></div>
+    <p class="measure">Everything above is negative. The constructive form: build the architecture the analysis implies — an explicit feedforward delay-line + coincidence detector, <em>no cycles, no inhibition, no homeostasis, no plasticity</em>, log-normal weights, matched mean delay — and run it against the recurrent architecture on every benchmark.</p>
+    <p class="measure"><strong>It matches.</strong> On capacity, read fairly (each architecture from its own most-active cells), the two are equal (~98–100% at K=1280). On memory depth it equals or beats the recurrent net. And it is far more robust to readout: with a <em>random</em> readout it holds 97% while the recurrent net drops to 35%, because feedforward concentrates the response while recurrence disperses and mixes it.</p>
+    <p class="measure hr-note">An honest correction, kept in the record because it <em>is</em> the point: a first pass showed feedforward “beating” recurrent 6× on capacity. That was a readout-selection artifact — the same confound as claim 5. Give the recurrent net its own best cells and the gap closes. The claim is <em>match</em>, not beat. The method, applied to the paper’s own positive.</p>
+  </section>
+
+  <section>
+    <div class="sechead"><span class="num">07</span><h2>The control the paper applies to itself</h2></div>
+    <p class="measure">Every number here was produced by the same process that reports it. So the final control is clean-room reproduction: from a <strong>fresh clone</strong>, one script regenerates each headline number from committed seeds and exits non-zero on any mismatch. The compute layer is deterministic and bit-exact — same seeds, same numbers. That is the point.</p>
+    <div class="tablewrap">
+      <table>
+        <caption>Regenerated from a fresh clone — 6/6 within tolerance, 27 min</caption>
+        <thead><tr><th>Headline result</th><th>Published</th><th>Reproduced</th></tr></thead>
+        <tbody>
+          <tr><td>Order refutation (del. ≈ intact)</td><td>≈</td><td class="ok">21.5% ≈ 20.1%</td></tr>
+          <tr><td>Delay gain is mean, not shape</td><td>80.7% / ~46%</td><td class="ok">80.6% / 44.1%</td></tr>
+          <tr><td>Delay-span is feedforward</td><td>62% ≤ 99.5%</td><td class="ok">67.8% ≤ 99.4%</td></tr>
+          <tr><td>Constructive: ff == recurrent (fair)</td><td>98% / 100%</td><td class="ok">97.8% / 100%</td></tr>
+          <tr><td>&nbsp;&nbsp;…readout robustness</td><td>97% / 35%</td><td class="ok">97.5% / 35.2%</td></tr>
+          <tr><td>Delay plasticity: cue ≈ random-trained</td><td>68.2% / 67.4%</td><td class="ok">70.1% / 68.1%</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section style="border-bottom:none;">
+    <div class="sechead"><span class="num">08</span><h2>Scope, and what this does not show</h2></div>
+    <p class="measure">One codebase, one implementation of each rule, synthetic tasks, no real data, a single rate-coded readout, one weight/delay regime; means over 3–5 seeds at N ≤ 64,000. The <em>method</em> generalises; the <em>results</em> are about this architecture on these tasks.</p>
+    <p class="measure">These dissolutions do not show that emergence fails in spiking networks, that these mechanisms fail in general, or that recurrence is useless. They show that <em>these formulations, in this architecture, on these tasks, produced nothing their matched controls did not</em> — and that a designed feedforward core reproduces the same behaviour more simply here. STDP, synaptic scaling, recurrent computation, and delay plasticity may each carry real structure under other encodings, tasks, or rules. This is evidence about one system, not a verdict on the ideas.</p>
+    <blockquote class="measure">Every promising number stayed a hypothesis about a confound until a matched control ruled it out — including the paper’s own constructive positive, twice. That is the contribution.</blockquote>
+  </section>
+
+  <footer class="wrap" style="padding-left:0;padding-right:0;">
+    <span class="repro">Reproducible.</span> &nbsp;All headline numbers regenerate from committed seeds via <span class="mono">reproduce.py</span> on a fresh clone. Findings, pre-registrations, and data are versioned beside the code.
+  </footer>
+</div>
