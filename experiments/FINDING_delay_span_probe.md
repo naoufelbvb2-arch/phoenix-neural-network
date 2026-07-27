@@ -47,8 +47,12 @@ The core question is answered at N=2000. Two registered arms remain and are now 
 is no recurrent-held memory for them to scale:
 - **N-scaling** (calibrated cue so 1-hop feedforward is matched across N; readout fixed) — asks whether
   feedforward propagation depth grows with N. Prediction: flattens under the calibrated control.
-- **Generators at matched mean** (uniform[5,8] vs converged vs distance-derived/geometry — Task 4
-  folded in) — asks whether any delay marginal beats a matched-mean uniform. Prediction: they tie;
-  geometry closes as a marginal generator.
+- **Generators at matched mean** (Task 4 folded in) — **DONE (2026-07-27).** At matched mean 6.5,
+  random-300 readout, K=1280: uniform[5,8] 31.6%, geometric (distance-derived) 15.0%, geo-shuffled
+  (positions destroyed) 16.7%. **geometric ≈ geo-shuffled → spatial correlation contributes nothing**
+  (geometry closes as a pure marginal generator, as predicted). And geometric < uniform at matched
+  mean → geometry's induced marginal (spread 1–18 ms) is *worse* than a tight uniform at the optimal
+  mean. **Task 4 closes with a measurement:** spatial structure is irrelevant; design the delay
+  marginal (tight, at the optimal mean) directly. Do not derive delays from geometry.
 
 Reproduce: `python experiments/delay_span_probe.py 2000`. Data: `experiments/delay_span_core_N2000.json`.
