@@ -124,15 +124,29 @@ same computation, obtained by design, discards the entire stability apparatus th
 needed. This is stated as implied by the measurements; the **constructive test** (§7) is what turns it
 from implication into demonstration.
 
-## 7. Constructive test (in progress) — build the implied architecture, run every benchmark
+## 7. Constructive test — build the implied architecture, run every benchmark
 
 Everything above is negative (X is not doing the work). The constructive form: build the architecture
 the analysis implies — an explicit feedforward delay-line + coincidence-detector network, **no cycles,
-no inhibition, no homeostasis, no plasticity**, log-normal weights, matched mean delay — and run it on
-every benchmark in the repo (memory span, K_max capacity, the lag/span ratio sweep) against the
-recurrent architecture. Matches or beats ⇒ the strongest confirmation, a dramatically simpler codebase,
-and a positive result rather than six negatives. Falls short somewhere ⇒ that gap is exactly where
-recurrence earns its keep — the one thing worth finding. *[Results filled in as they land.]*
+no inhibition, no homeostasis, no plasticity**, log-normal weights, matched mean delay — and run it
+against the recurrent architecture on the repo's benchmarks.
+
+**Result: it matches.** On capacity (K_max), read fairly — each architecture from its own most-active
+cells — the two are equal (~98–100% at K=1280, floor 0). On memory depth it equals or beats the
+recurrent net (99.5% vs 62% at 3 mean-hops, where the recurrent signal decays into interference). And
+it is far more robust to readout: with a *random* readout the feedforward net still holds 97% while the
+recurrent net drops to 35%, because feedforward concentrates the response in a layer while recurrence
+disperses and mixes it. So the recurrence is not just inessential — where it differs it *hurts*, and
+its capacity is no higher.
+
+**An honest correction, kept in the record because it is the point:** a first pass showed feedforward
+"beating" recurrent 6× on capacity. That was a readout-selection artifact — feedforward read from its
+concentrated active layer, recurrent from random cells (Control A, again). Giving the recurrent net its
+own best cells closed the gap. The claim is **match**, not beat; the inflated number was controlled
+away — the method applied to the paper's own positive result.
+
+The constructive positive therefore stands in its defensible form: the same computation, obtained by
+design, reproduces the recurrent architecture while discarding the entire stability apparatus (§6).
 
 ## 8. Scope and honesty
 
